@@ -51,6 +51,19 @@
         landPolygons = await response.json();
       }
 
+      async function loadCities() {
+        const response = await fetch('assets/cities.geojson');
+        return await response.json();
+      }
+
+      function getRandomCityPoint(cities) {
+        const city = cities.features[Math.floor(Math.random() * cities.features.length)];
+        return {
+          lat: city.geometry.coordinates[1],
+          lng: city.geometry.coordinates[0]
+        };
+      }
+
       function getRandomLandPoint() {
         while (true) {
           const lat = Math.random() * 140 - 70;
@@ -63,13 +76,14 @@
       }
 
       await loadLandPolygons();
-      const start = getRandomLandPoint();
+      const cities = await loadCities();
+      const start = getRandomCityPoint(cities);
       const GameState = { player: { lat: start.lat, lng: start.lng } };
 
       const map = L.map('map', {
         zoomControl: false,
         minZoom: 2,        maxZoom: 19
-      }).setView([GameState.player.lat, GameState.player.lng], 10);
+      }).setView([GameState.player.lat, GameState.player.lng], 14);
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
@@ -88,12 +102,10 @@
       let carHeading = 0, carSpeed = 0, accelerating = false, lastFetchTime = 0;
 
       document.addEventListener('keydown', (e) => {
-        if (e.key === 'ArrowUp') { carSpeed += 0.15; accelerating = true; }
-        if (e.key === 'ArrowDown') { carSpeed -= 0.15; accelerating = true; }
-        if (Math.abs(carSpeed) > 0.001) {
-          if (e.key === 'ArrowLeft') carHeading -= 5;
-          if (e.key === 'ArrowRight') carHeading += 5;
-        }
+        if (e.key === 'ArrowUp') { carSpeed += 0.30; accelerating = true; }
+        if (e.key === 'ArrowDown') { carSpeed -= 0.30; accelerating = true; }
+        if (e.key === 'ArrowLeft') carHeading -= 5;
+        if (e.key === 'ArrowRight') carHeading += 5;
       });
 
       document.addEventListener('keyup', (e) => {
@@ -111,7 +123,9 @@
           newLng += distance * Math.sin(headingRad);
         }
 
-        const onWater = (newLat < -60 || newLat > 60 || newLng < -180 || newLng > 180);
+        const pt = turf.point([newLng, newLat]);
+const isLand = landPolygons.features.some(feature => turf.booleanPointInPolygon(pt, feature));
+const onWater = !isLand;
         const newIcon = onWater ? 'assets/boat.png' : 'assets/car.png';
 
         if (newIcon !== currentIcon) {
