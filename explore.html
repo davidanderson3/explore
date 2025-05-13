@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>World Explorer</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    html, body, #map {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+    }
+    #infoPanel {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 300px;
+      height: 100%;
+      background: white;
+      overflow-y: auto;
+      padding: 10px;
+      box-shadow: -2px 0 5px rgba(0,0,0,0.3);
+      font-family: sans-serif;
+      display: none;
+      z-index: 1000;
+    }
+    @media (max-width: 768px) {
+      #infoPanel {
+        width: 100%;
+        height: 200px;
+        bottom: 0;
+        top: auto;
+        right: 0;
+        box-shadow: 0 -2px 5px rgba(0,0,0,0.3);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="infoPanel"></div>
+
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+  <script>
+    (async function init() {
+      let landPolygons;
+
+      async function loadLandPolygons() {
+        const response = await fetch('assets/land.geojson');
+        landPolygons = await response.json();
+      }
+
+      function getRandomLandPoint() {
+        while (true) {
+          const lat = Math.random() * 140 - 70;
+          const lng = Math.random() * 360 - 180;
+          const pt = turf.point([lng, lat]);
+          if (landPolygons.features.some(feature => turf.booleanPointInPolygon(pt, feature))) {
+            return { lat, lng };
+          }
+        }
+      }
+
+      await loadLandPolygons();
+      const start = getRandomLandPoint();
+      const GameState = { player: { lat: start.lat, lng: start.lng } };
+
+      const map = L.map('map', {
+        zoomControl: false,
+        minZoom: 2,        maxZoom: 19
+      }).setView([GameState.player.lat, GameState.player.lng], 10);
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '© OpenStreetMap'
+      }).addTo(map);
+
+      let currentIcon = 'assets/car.png';
+      const playerMarker = L.marker([GameState.player.lat, GameState.player.lng], {
+        icon: L.divIcon({
+          html: `<img src="${currentIcon}" style="width:40px;height:40px;transform: rotate(0deg); transform-origin: center center;">`,
+          iconSize: [40, 40],
+          className: ''
+        })
+      }).addTo(map);
+
+      let carHeading = 0, carSpeed = 0, accelerating = false, lastFetchTime = 0;
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowUp') { carSpeed += 0.15; accelerating = true; }
+        if (e.key === 'ArrowDown') { carSpeed -= 0.15; accelerating = true; }
+        if (Math.abs(carSpeed) > 0.001) {
+          if (e.key === 'ArrowLeft') carHeading -= 5;
+          if (e.key === 'ArrowRight') carHeading += 5;
+        }
+      });
+
+      document.addEventListener('keyup', (e) => {
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') accelerating = false;
+      });
+
+      function updateCarPosition() {
+        const latlng = playerMarker.getLatLng();
+        const headingRad = carHeading * Math.PI / 180;
+        let newLat = latlng.lat, newLng = latlng.lng;
+
+        if (Math.abs(carSpeed) > 0.001) {
+          const distance = carSpeed * 0.001;
+          newLat += distance * Math.cos(headingRad);
+          newLng += distance * Math.sin(headingRad);
+        }
+
+        const onWater = (newLat < -60 || newLat > 60 || newLng < -180 || newLng > 180);
+        const newIcon = onWater ? 'assets/boat.png' : 'assets/car.png';
+
+        if (newIcon !== currentIcon) {
+          currentIcon = newIcon;
+          playerMarker.setIcon(L.divIcon({
+            html: `<img src="${currentIcon}" style="width:40px;height:40px;transform: rotate(${carHeading}deg); transform-origin: center center;">`,
+            iconSize: [40, 40],
+            className: ''
+          }));
+        }
+
+        playerMarker.setLatLng([newLat, newLng]);
+        const iconElement = playerMarker.getElement();
+        if (iconElement instanceof HTMLElement) {
+          const img = iconElement.querySelector('img');
+          if (img) {
+            img.style.transformOrigin = 'center center';
+            img.style.transform = `rotate(${carHeading}deg)`;
+          }
+        }
+
+        map.panTo([newLat, newLng], { animate: false });
+        GameState.player.lat = newLat;
+        GameState.player.lng = newLng;
+
+        const now = Date.now();
+        if (carSpeed !== 0 && (now - lastFetchTime > 3000)) {
+          fetchWikipediaContent(newLat, newLng);
+          lastFetchTime = now;
+        }
+
+        if (!accelerating) carSpeed *= 0.99;
+        requestAnimationFrame(updateCarPosition);
+      }
+
+      async function fetchWikipediaContent(lat, lon) {
+        try {
+          const response = await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${lat}%7C${lon}&gsradius=10000&gslimit=1&format=json&origin=*`);
+          const data = await response.json();
+          const pages = data.query.geosearch;
+
+          if (pages.length > 0) {
+            const page = pages[0];
+            L.marker([page.lat, page.lon]).addTo(map).bindPopup(page.title);
+            const title = page.title;
+            const urlTitle = encodeURIComponent(title.replace(/ /g, '_'));
+            const pageResponse = await fetch(`https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&titles=${urlTitle}&format=json&origin=*`);
+            const pageData = await pageResponse.json();
+            const pageId = Object.keys(pageData.query.pages)[0];
+            const extract = pageData.query.pages[pageId].extract;
+
+            const infoPanel = document.getElementById('infoPanel');
+            let imgHtml = '';
+            try {
+              const imgResponse = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${urlTitle}&prop=pageimages&format=json&pithumbsize=300&origin=*`);
+              const imgData = await imgResponse.json();
+              const imgPageId = Object.keys(imgData.query.pages)[0];
+              const img = imgData.query.pages[imgPageId].thumbnail ? imgData.query.pages[imgPageId].thumbnail.source : '';
+              if (img) imgHtml = `<img src='${img}' style='max-width:100%; margin-bottom:10px;'>`;
+            } catch {}
+
+            infoPanel.innerHTML = `<h3>${title}</h3>${imgHtml}<p>${extract}</p><a href='https://en.wikipedia.org/wiki/${urlTitle}' target='_blank'>Read more on Wikipedia</a>`;
+            infoPanel.style.display = 'block';
+          } else {
+            document.getElementById('infoPanel').style.display = 'none';
+          }
+        } catch (err) {
+          console.error(err);
+          document.getElementById('infoPanel').style.display = 'none';
+        }
+      }
+
+      updateCarPosition();
+    })();
+  </script>
+</body>
+</html>
