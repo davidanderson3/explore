@@ -245,6 +245,28 @@ if (isSpecial) {
 
       map.setView(playerMarker.getLatLng(), 17, { animate: false });
       updateCarPosition();
+
+      document.getElementById('myLocation').onclick = () => {
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(position => {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            playerMarker.setLatLng([lat, lng]);
+            map.setView([lat, lng], 17);
+            GameState.player.lat = lat;
+            GameState.player.lng = lng;
+          });
+        }
+      };
+
+      document.getElementById('randomLocation').onclick = () => {
+        const random = getRandomCityPoint(cities);
+        playerMarker.setLatLng([random.lat, random.lng]);
+        map.setView([random.lat, random.lng], 17);
+        GameState.player.lat = random.lat;
+        GameState.player.lng = random.lng;
+      };
+
     })();
   </script>
 <div id="instructions" style="position: absolute; bottom: 10px; left: 120px; background: rgba(255,255,255,0.8); padding: 10px; font-family: sans-serif; z-index: 9999;">
@@ -255,8 +277,13 @@ if (isSpecial) {
     <button id="right">▶</button><br>
     <button id="down">▼</button>
   </div>
-</div>
+  <div id="exploreButtons" style="position: absolute; bottom: 10px; left: 300px; background: rgba(255,255,255,0.8); padding: 10px; font-family: sans-serif; z-index: 9999; display: flex; gap: 10px;">
+    <button id="myLocation">Explore My Location</button>
+    <button id="randomLocation">Explore Random Location</button>
+  </div>
 <script>
+
+
 
 
 if (window.innerWidth <= 768) {
