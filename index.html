@@ -281,14 +281,12 @@ if (isSpecial) {
 <div id="exploreButtons" style="position: fixed; bottom: 10px; left: 300px; background: rgba(255,255,255,0.8); padding: 10px; font-family: sans-serif; z-index: 9999; display: flex; gap: 10px;">
   <button id="myLocation">Explore My Location</button>
   <button id="randomLocation">Explore Random Location</button>
+</div> style="position: fixed; bottom: 10px; left: 300px; background: rgba(255,255,255,0.8); padding: 10px; font-family: sans-serif; z-index: 9999; display: flex; gap: 10px;">
+  <button id="myLocation">Explore My Location</button>
+  <button id="randomLocation">Explore Random Location</button>
 </div>
   </div>
-<script>
-if (window.innerWidth <= 768) {
-    document.getElementById('desktopInstructions').style.display = 'none';
-    document.getElementById('mobileControls').style.display = 'block';
-
-    document.getElementById('up').onclick = () => { carSpeed += 0.03; accelerating = true; };
+;
     document.getElementById('left').onclick = () => { carHeading -= 8; };
     document.getElementById('right').onclick = () => { carHeading += 8; };
     document.getElementById('down').onclick = () => { carSpeed -= 0.03; accelerating = true; };
