@@ -269,7 +269,7 @@ if (isSpecial) {
 
     })();
   </script>
-<div id="instructions" style="position: absolute; bottom: 10px; left: 120px; background: rgba(255,255,255,0.8); padding: 10px; font-family: sans-serif; z-index: 9999;">
+<div id="instructions" style="position: fixed; bottom: 10px; left: 10px; background: rgba(255,255,255,0.8); padding: 10px; font-family: sans-serif; z-index: 9999;">
   <span id="desktopInstructions">Use arrow keys to drive.</span>
   <div id="mobileControls" style="display:none;">
     <button id="up">▲</button><br>
@@ -277,24 +277,11 @@ if (isSpecial) {
     <button id="right">▶</button><br>
     <button id="down">▼</button>
   </div>
-  <div id="exploreButtons" style="position: absolute; bottom: 10px; left: 300px; background: rgba(255,255,255,0.8); padding: 10px; font-family: sans-serif; z-index: 9999; display: flex; gap: 10px;">
-    <button id="myLocation">Explore My Location</button>
-    <button id="randomLocation">Explore Random Location</button>
+</div>
+<div id="exploreButtons" style="position: fixed; bottom: 10px; left: 300px; background: rgba(255,255,255,0.8); padding: 10px; font-family: sans-serif; z-index: 9999; display: flex; gap: 10px;">
+  <button id="myLocation">Explore My Location</button>
+  <button id="randomLocation">Explore Random Location</button>
+</div>
   </div>
-<script>
-
-
-
-
-if (window.innerWidth <= 768) {
-        document.getElementById('up').onclick = () => { carSpeed += 0.03; accelerating = true; };
-        document.getElementById('left').onclick = () => { carHeading -= 8; };
-        document.getElementById('right').onclick = () => { carHeading += 8; };
-        document.getElementById('down').onclick = () => { carSpeed -= 0.03; accelerating = true; };
-
-        document.getElementById('desktopInstructions').style.display = 'none';
-        document.getElementById('mobileControls').style.display = 'block';
-      }
-</script>
 </body>
 </html>
