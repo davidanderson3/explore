@@ -243,6 +243,7 @@ if (isSpecial) {
         }
       }
 
+      map.setView(playerMarker.getLatLng(), 17, { animate: false });
       updateCarPosition();
     })();
   </script>
@@ -256,22 +257,17 @@ if (isSpecial) {
   </div>
 </div>
 <script>
-document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('up').onclick = () => { carSpeed += 0.03; accelerating = true; };
-  document.getElementById('left').onclick = () => { carHeading -= 8; };
-  document.getElementById('right').onclick = () => { carHeading += 8; };
-  document.getElementById('down').onclick = () => { carSpeed -= 0.03; accelerating = true; };
 
-  if (window.innerWidth <= 768) {
-    document.getElementById('desktopInstructions').style.display = 'none';
-    document.getElementById('mobileControls').style.display = 'block';
-  }
-});
 
 if (window.innerWidth <= 768) {
-  document.getElementById('desktopInstructions').style.display = 'none';
-  document.getElementById('mobileControls').style.display = 'block';
-}
+        document.getElementById('up').onclick = () => { carSpeed += 0.03; accelerating = true; };
+        document.getElementById('left').onclick = () => { carHeading -= 8; };
+        document.getElementById('right').onclick = () => { carHeading += 8; };
+        document.getElementById('down').onclick = () => { carSpeed -= 0.03; accelerating = true; };
+
+        document.getElementById('desktopInstructions').style.display = 'none';
+        document.getElementById('mobileControls').style.display = 'block';
+      }
 </script>
 </body>
 </html>
