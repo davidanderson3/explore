@@ -30,26 +30,10 @@
     keepBuffer: 8
   });
 
-  const baseTileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors',
-    updateWhenIdle: true,
-    updateWhenZooming: false,
-    keepBuffer: 8,
-    crossOrigin: true,
-    noWrap: true,
-    detectRetina: true
-  });
-
-  const baseLayers = {
-    "Streets": baseTileLayer,
-    "Satellite": L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      attribution: '© ESRI',
-      crossOrigin: true
-    })
-  };
-
-  baseTileLayer.addTo(map);
-  L.control.layers(baseLayers, null, { position: 'bottomleft' }).addTo(map);
+  const terrainLayer = L.tileLayer('https://stamen-tiles.a.ssl.fastly.net/terrain/{z}/{x}/{y}.jpg', {
+    attribution: 'Map tiles by Stamen Design, CC BY 3.0 — Map data © OpenStreetMap contributors',
+    maxZoom: 18
+  }).addTo(map);
 
   let currentIcon = 'assets/car.png';
   const playerMarker = L.marker([GameState.player.lat, GameState.player.lng], {
@@ -66,6 +50,7 @@
   window.addEventListener('orientationchange', () => setTimeout(() => map.invalidateSize(), 500));
 
   let carHeading = 0, carSpeed = 0, accelerating = false, lastFetchTime = 0;
+  let touchTarget = null;
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowUp') { carSpeed += 0.03; accelerating = true; }
@@ -80,54 +65,50 @@
 
   if (window.innerWidth <= 768) {
     document.getElementById('desktopInstructions').style.display = 'none';
-    setupSwipeControls();
+    setupTouchDirectionControl();
   }
 
-  function setupSwipeControls() {
-    let touchStartX = 0, touchStartY = 0;
-
+  function setupTouchDirectionControl() {
     document.addEventListener('touchstart', (e) => {
       if (e.touches.length === 1) {
-        touchStartX = e.touches[0].clientX;
-        touchStartY = e.touches[0].clientY;
+        touchTarget = e.touches[0];
+        accelerating = true;
       }
     });
 
-    document.addEventListener('touchend', (e) => {
-      if (e.changedTouches.length === 1) {
-        const dx = e.changedTouches[0].clientX - touchStartX;
-        const dy = e.changedTouches[0].clientY - touchStartY;
-
-        const absDx = Math.abs(dx);
-        const absDy = Math.abs(dy);
-
-        if (absDx < 30 && absDy < 30) return;
-
-        if (absDx > absDy) {
-          if (dx > 0) carHeading += 8;
-          else carHeading -= 8;
-        } else {
-          if (dy > 0) carSpeed -= 0.05;
-          else carSpeed += 0.05;
-          accelerating = true;
-        }
+    document.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 1) {
+        touchTarget = e.touches[0];
       }
+    });
+
+    document.addEventListener('touchend', () => {
+      touchTarget = null;
+      accelerating = false;
     });
   }
 
   setInterval(() => {
     if (!accelerating) carSpeed *= 0.99;
-    accelerating = false;
   }, 50);
 
   function updateCarPosition() {
     const latlng = playerMarker.getLatLng();
+
+    if (touchTarget) {
+      const mapSize = map.getSize();
+      const mapCenter = map.latLngToContainerPoint(latlng);
+      const touchPoint = L.point(touchTarget.clientX, touchTarget.clientY);
+      const angle = Math.atan2(touchPoint.x - mapCenter.x, mapCenter.y - touchPoint.y);
+      carHeading = angle * 180 / Math.PI;
+      carSpeed += 0.01; // accelerate while touching
+    }
+
     const headingRad = carHeading * Math.PI / 180;
     let newLat = latlng.lat, newLng = latlng.lng;
 
     if (Math.abs(carSpeed) > 0.001) {
-      if (carSpeed > 4.0) carSpeed = 4.0;
-      if (carSpeed < -4.0) carSpeed = -4.0;
+      carSpeed = Math.max(Math.min(carSpeed, 4.0), -4.0);
       const distance = carSpeed * 0.001;
       newLat += distance * Math.cos(headingRad);
       newLng += distance * Math.sin(headingRad);
