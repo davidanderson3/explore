@@ -175,9 +175,9 @@
       const angle = Math.atan2(touchPoint.x - mapCenter.x, mapCenter.y - touchPoint.y);
       const targetHeading = angle * 180 / Math.PI;
       let delta = ((targetHeading - carHeading + 540) % 360) - 180;
-      carHeading += delta * 0.05; // smoother turning
-      const targetSpeed = 1.0;
-      carSpeed += (targetSpeed - carSpeed) * 0.05; // smooth acceleration
+      carHeading += delta * 0.005; // smoother turning
+      const targetSpeed = 0.2;
+      carSpeed += (targetSpeed - carSpeed) * 0.005; // smooth acceleration
       let delta = ((targetHeading - carHeading + 540) % 360) - 180;
       carHeading += delta * 0.1; // adjust 10% of the way toward target
       carSpeed += 0.01;
