@@ -33,27 +33,46 @@ html, body, #map {
 
 #instructions {
   position: fixed;
-  bottom: 10px;
-  left: 10px;
-  background: rgba(255,255,255,0.8);
-  padding: 10px;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.8);
+  padding: 10px 16px;
   font-family: sans-serif;
-  z-index: 9999;
+  z-index: 1002;
+  max-width: 90%;
+  border-radius: 6px;
+  box-shadow: 0 0 5px rgba(0,0,0,0.1);
+  text-align: center;
 }
+
+@media (max-width: 768px) {
+  #instructions {
+    display: none;
+  }
+}
+
 
 #exploreButtons {
   position: fixed;
   bottom: 10px;
-  left: 300px;
-  background: rgba(255,255,255,0.8);
+  right: 10px;
+  background: rgba(255,255,255,0.95);
   padding: 10px;
   font-family: sans-serif;
-  z-index: 9999;
+  z-index: 1001;
   display: flex;
+  flex-direction: column;
   gap: 10px;
 }
 
 .leaflet-tile {
   transition: none !important;
   opacity: 1 !important;
+}
+
+.leaflet-control-layers {
+  z-index: 1001 !important;
+  top: 10px !important;
+  right: 10px !important;
 }

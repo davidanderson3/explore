@@ -30,9 +30,9 @@
     keepBuffer: 8
   });
 
-  const terrainLayer = L.tileLayer('https://stamen-tiles.a.ssl.fastly.net/terrain/{z}/{x}/{y}.jpg', {
-    attribution: 'Map tiles by Stamen Design, CC BY 3.0 — Map data © OpenStreetMap contributors',
-    maxZoom: 18
+  const baseLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors',
+    maxZoom: 19
   }).addTo(map);
 
   let currentIcon = 'assets/car.png';
@@ -92,6 +92,79 @@
     if (!accelerating) carSpeed *= 0.99;
   }, 50);
 
+  async function fetchWikipediaContent(lat, lon) {
+    try {
+      const response = await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${lat}%7C${lon}&gsradius=10000&gslimit=1&format=json&origin=*`);
+      const data = await response.json();
+      const pages = data.query.geosearch;
+
+      if (pages.length > 0) {
+        const page = pages[0];
+        L.marker([page.lat, page.lon]).addTo(map).bindPopup(page.title);
+        const title = page.title;
+        const urlTitle = encodeURIComponent(title.replace(/ /g, '_'));
+        const pageResponse = await fetch(`https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&titles=${urlTitle}&format=json&origin=*`);
+        const pageData = await pageResponse.json();
+        const pageId = Object.keys(pageData.query.pages)[0];
+        const extract = pageData.query.pages[pageId].extract;
+
+        let isSpecial = false;
+        try {
+          const catResponse = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${urlTitle}&prop=categories&format=json&origin=*`);
+          const catData = await catResponse.json();
+          const categories = catData.query.pages[pageId].categories?.map(c => c.title.toLowerCase()) || [];
+          const specialCategories = ['world heritage', 'historic landmark', 'national monument', 'unesco', 'natural wonder', 'architectural landmark'];
+          isSpecial = categories.some(cat => specialCategories.some(sc => cat.includes(sc)));
+        } catch {}
+
+        if (isSpecial) {
+          const specialMsg = document.createElement('div');
+          specialMsg.textContent = '★ SPECIAL SITE! ★';
+          specialMsg.style.position = 'absolute';
+          specialMsg.style.top = '50%';
+          specialMsg.style.left = '50%';
+          specialMsg.style.transform = 'translate(-50%, -50%)';
+          specialMsg.style.background = 'gold';
+          specialMsg.style.padding = '20px';
+          specialMsg.style.fontSize = '24px';
+          specialMsg.style.fontWeight = 'bold';
+          specialMsg.style.border = '3px solid black';
+          specialMsg.style.borderRadius = '10px';
+          specialMsg.style.zIndex = '2000';
+          document.body.appendChild(specialMsg);
+
+          specialMsg.animate([
+            { transform: 'translate(-50%, -50%) scale(1)', opacity: 1 },
+            { transform: 'translate(-50%, -50%) scale(1.5)', opacity: 0 }
+          ], {
+            duration: 2000,
+            easing: 'ease-out'
+          });
+
+          setTimeout(() => document.body.removeChild(specialMsg), 2000);
+        }
+
+        const infoPanel = document.getElementById('infoPanel');
+        let imgHtml = '';
+        try {
+          const imgResponse = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${urlTitle}&prop=pageimages&format=json&pithumbsize=300&origin=*`);
+          const imgData = await imgResponse.json();
+          const imgPageId = Object.keys(imgData.query.pages)[0];
+          const img = imgData.query.pages[imgPageId].thumbnail ? imgData.query.pages[imgPageId].thumbnail.source : '';
+          if (img) imgHtml = `<img src='${img}' style='max-width:100%; margin-bottom:10px;'>`;
+        } catch {}
+
+        infoPanel.innerHTML = `<h3>${title}</h3>${imgHtml}<p>${extract}</p><a href='https://en.wikipedia.org/wiki/${urlTitle}' target='_blank'>Read more on Wikipedia</a>`;
+        infoPanel.style.display = 'block';
+      } else {
+        document.getElementById('infoPanel').style.display = 'none';
+      }
+    } catch (err) {
+      console.error(err);
+      document.getElementById('infoPanel').style.display = 'none';
+    }
+  }
+
   function updateCarPosition() {
     const latlng = playerMarker.getLatLng();
 
@@ -100,8 +173,10 @@
       const mapCenter = map.latLngToContainerPoint(latlng);
       const touchPoint = L.point(touchTarget.clientX, touchTarget.clientY);
       const angle = Math.atan2(touchPoint.x - mapCenter.x, mapCenter.y - touchPoint.y);
-      carHeading = angle * 180 / Math.PI;
-      carSpeed += 0.01; // accelerate while touching
+      const targetHeading = angle * 180 / Math.PI;
+      let delta = ((targetHeading - carHeading + 540) % 360) - 180;
+      carHeading += delta * 0.1; // adjust 10% of the way toward target
+      carSpeed += 0.01;
     }
 
     const headingRad = carHeading * Math.PI / 180;
@@ -144,6 +219,12 @@
     map.panTo([newLat, newLng], { animate: false });
     GameState.player.lat = newLat;
     GameState.player.lng = newLng;
+
+    const now = Date.now();
+    if (carSpeed !== 0 && (now - lastFetchTime > 3000)) {
+      fetchWikipediaContent(newLat, newLng);
+      lastFetchTime = now;
+    }
 
     requestAnimationFrame(updateCarPosition);
   }
