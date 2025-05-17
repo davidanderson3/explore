@@ -9,34 +9,36 @@ html, body, #map {
   position: absolute;
   top: 0;
   right: 0;
-  width: 300px;
-  height: 100%;
+  width: 320px;
+  max-height: 60%;
   background: white;
   overflow-y: auto;
-  padding: 10px;
+  padding: 12px;
   box-shadow: -2px 0 5px rgba(0,0,0,0.3);
   font-family: sans-serif;
   display: none;
-  z-index: 9999;
+  z-index: 9998;
+  margin-bottom: 80px; /* creates space above buttons */
 }
 
 @media (max-width: 768px) {
   #infoPanel {
     position: fixed;
     top: auto;
-    bottom: 60px;
+    bottom: 80px;
     left: 0;
     right: 0;
     width: 100%;
-    height: auto;
-    max-height: 40vh;
+    max-height: 35vh;
     padding: 12px;
     font-size: 16px;
     box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.3);
     overflow-y: auto;
-    z-index: 9999;
+    z-index: 9998;
+    background: white;
   }
 }
+
 
 
 #infoPanel img {
@@ -86,11 +88,12 @@ html, body, #map {
   background: rgba(255,255,255,0.95);
   padding: 10px;
   font-family: sans-serif;
-  z-index: 1001;
+  z-index: 9999; /* was 1001 */
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
+
 
 .leaflet-tile {
   transition: none !important;
