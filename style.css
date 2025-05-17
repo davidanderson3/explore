@@ -17,23 +17,27 @@ html, body, #map {
   box-shadow: -2px 0 5px rgba(0,0,0,0.3);
   font-family: sans-serif;
   display: none;
-  z-index: 1000;
+  z-index: 9999;
 }
 
 @media (max-width: 768px) {
   #infoPanel {
-    width: 100%;
-    height: 40%;
-    bottom: 60px;
+    position: fixed;
     top: auto;
+    bottom: 60px;
     left: 0;
     right: 0;
+    width: 100%;
+    height: auto;
+    max-height: 40vh;
     padding: 12px;
     font-size: 16px;
     box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.3);
     overflow-y: auto;
+    z-index: 9999;
   }
 }
+
 
 #infoPanel img {
   max-width: 100%;
