@@ -226,10 +226,12 @@ const now = Date.now();
 
 console.log(`📦 moved: ${moved}, deltaT: ${now - lastFetchTime}`);
 
-if (carSpeed !== 0 && now - lastFetchTime > 1000 && moved) {
+if (now - lastFetchTime > 3000) {
+  console.log("🧪 FORCED FETCH TRIGGER");
   lastFetchTime = now;
   fetchWikidataContent(newLat, newLng);
 }
+
 
 GameState.player.lat = newLat;
 GameState.player.lng = newLng;
