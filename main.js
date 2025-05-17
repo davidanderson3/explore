@@ -175,8 +175,8 @@ function updateCarPosition() {
       const targetHeading = angle * 180 / Math.PI;
       const delta = ((targetHeading - carHeading + 540) % 360) - 180;
       carHeading += delta * 0.05;
-      const targetSpeed = 0.2;
-      carSpeed += (targetSpeed - carSpeed) * 0.01;
+      const targetSpeed = 0.1;
+      carSpeed += (targetSpeed - carSpeed) * 0.003;
     }
 
     const headingRad = carHeading * Math.PI / 180;
