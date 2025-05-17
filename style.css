@@ -23,13 +23,35 @@ html, body, #map {
 @media (max-width: 768px) {
   #infoPanel {
     width: 100%;
-    height: 200px;
-    bottom: 0;
+    height: 40%;
+    bottom: 60px;
     top: auto;
+    left: 0;
     right: 0;
-    box-shadow: 0 -2px 5px rgba(0,0,0,0.3);
+    padding: 12px;
+    font-size: 16px;
+    box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.3);
+    overflow-y: auto;
   }
 }
+
+#infoPanel img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin-bottom: 10px;
+}
+
+#infoPanel h3 {
+  margin-top: 0;
+  font-size: 1.2em;
+}
+
+#infoPanel p {
+  line-height: 1.4;
+  margin-bottom: 10px;
+}
+
 
 #instructions {
   position: fixed;
