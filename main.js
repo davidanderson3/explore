@@ -219,7 +219,16 @@ if (keysPressed['ArrowDown']) carSpeed -= 0.009;
         }
       }
 
-      map.panTo([newLat, newLng], { animate: false });
+// Calculate how far the car has drifted from the map center
+const center = map.getCenter();
+const dx = Math.abs(center.lat - newLat);
+const dy = Math.abs(center.lng - newLng);
+
+// Only pan if the marker moves off-center significantly (e.g., >0.002 degrees)
+if (dx > 0.002 || dy > 0.002) {
+  map.panTo([newLat, newLng], { animate: true }); // or animate: false if needed
+}
+
 
       const oldLat = GameState.player.lat;
       const oldLng = GameState.player.lng;
@@ -259,7 +268,7 @@ if (keysPressed['ArrowDown']) carSpeed -= 0.009;
   document.getElementById('randomLocation').onclick = () => {
     const random = getRandomCityPoint(cities);
     playerMarker.setLatLng([random.lat, random.lng]);
-    map.setView([random.lat, random.lng], 17);
+    map.setView([random.lat, random.lng], 14);
     GameState.player.lat = random.lat;
     GameState.player.lng = random.lng;
   };
