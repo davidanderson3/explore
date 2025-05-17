@@ -1,4 +1,3 @@
-// main.js
 (async function init() {
   let landPolygons;
 
@@ -89,102 +88,98 @@
   }
 
   setInterval(() => {
-    if (!accelerating) carSpeed *= 0.99;
+    if (!accelerating) {
+      carSpeed += (0 - carSpeed) * 0.1;
+    }
   }, 50);
 
-  async function fetchWikipediaContent(lat, lon) {
-    try {
-      const response = await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${lat}%7C${lon}&gsradius=10000&gslimit=1&format=json&origin=*`);
-      const data = await response.json();
-      const pages = data.query.geosearch;
+async function fetchWikidataContent(lat, lon) {
+  console.log(`🔎 Attempting fetch for (${lat.toFixed(5)}, ${lon.toFixed(5)})`);
 
-      if (pages.length > 0) {
-        const page = pages[0];
-        L.marker([page.lat, page.lon]).addTo(map).bindPopup(page.title);
-        const title = page.title;
-        const urlTitle = encodeURIComponent(title.replace(/ /g, '_'));
-        const pageResponse = await fetch(`https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&titles=${urlTitle}&format=json&origin=*`);
-        const pageData = await pageResponse.json();
-        const pageId = Object.keys(pageData.query.pages)[0];
-        const extract = pageData.query.pages[pageId].extract;
-
-        let isSpecial = false;
-        try {
-          const catResponse = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${urlTitle}&prop=categories&format=json&origin=*`);
-          const catData = await catResponse.json();
-          const categories = catData.query.pages[pageId].categories?.map(c => c.title.toLowerCase()) || [];
-          const specialCategories = ['world heritage', 'historic landmark', 'national monument', 'unesco', 'natural wonder', 'architectural landmark'];
-          isSpecial = categories.some(cat => specialCategories.some(sc => cat.includes(sc)));
-        } catch {}
-
-        if (isSpecial) {
-          const specialMsg = document.createElement('div');
-          specialMsg.textContent = '★ SPECIAL SITE! ★';
-          specialMsg.style.position = 'absolute';
-          specialMsg.style.top = '50%';
-          specialMsg.style.left = '50%';
-          specialMsg.style.transform = 'translate(-50%, -50%)';
-          specialMsg.style.background = 'gold';
-          specialMsg.style.padding = '20px';
-          specialMsg.style.fontSize = '24px';
-          specialMsg.style.fontWeight = 'bold';
-          specialMsg.style.border = '3px solid black';
-          specialMsg.style.borderRadius = '10px';
-          specialMsg.style.zIndex = '2000';
-          document.body.appendChild(specialMsg);
-
-          specialMsg.animate([
-            { transform: 'translate(-50%, -50%) scale(1)', opacity: 1 },
-            { transform: 'translate(-50%, -50%) scale(1.5)', opacity: 0 }
-          ], {
-            duration: 2000,
-            easing: 'ease-out'
-          });
-
-          setTimeout(() => document.body.removeChild(specialMsg), 2000);
+  try {
+    const query = `
+      SELECT ?item ?itemLabel ?description ?image WHERE {
+        SERVICE wikibase:around {
+          ?item wdt:P625 ?coord .
+          bd:serviceParam wikibase:center "Point(${lon} ${lat})"^^geo:wktLiteral .
+          bd:serviceParam wikibase:radius "10" .
         }
-
-        const infoPanel = document.getElementById('infoPanel');
-        let imgHtml = '';
-        try {
-          const imgResponse = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${urlTitle}&prop=pageimages&format=json&pithumbsize=300&origin=*`);
-          const imgData = await imgResponse.json();
-          const imgPageId = Object.keys(imgData.query.pages)[0];
-          const img = imgData.query.pages[imgPageId].thumbnail ? imgData.query.pages[imgPageId].thumbnail.source : '';
-          if (img) imgHtml = `<img src='${img}' style='max-width:100%; margin-bottom:10px;'>`;
-        } catch {}
-
-        infoPanel.innerHTML = `<h3>${title}</h3>${imgHtml}<p>${extract}</p><a href='https://en.wikipedia.org/wiki/${urlTitle}' target='_blank'>Read more on Wikipedia</a>`;
-        infoPanel.style.display = 'block';
-      } else {
-        document.getElementById('infoPanel').style.display = 'none';
+        OPTIONAL { ?item schema:description ?description FILTER(LANG(?description) = "en") }
+        OPTIONAL { ?item wdt:P18 ?image }
+        SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
       }
-    } catch (err) {
-      console.error(err);
-      document.getElementById('infoPanel').style.display = 'none';
+      LIMIT 1
+    `;
+
+    const response = await fetch("https://query.wikidata.org/sparql", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/sparql-query",
+        "Accept": "application/sparql-results+json"
+      },
+      body: query
+    });
+
+    const data = await response.json();
+    const result = data.results.bindings[0];
+    if (!result) {
+      console.log("⚠️ No result from Wikidata.");
+      document.getElementById("infoPanel").style.display = "none";
+      return;
     }
+
+    const title = result.itemLabel.value;
+    const description = result.description?.value || "No description available.";
+    const wikidataUrl = result.item.value;
+
+    let imgHtml = "";
+    if (result.image) {
+      const fileName = result.image.value.split("/").pop();
+      const commonsResp = await fetch(`https://commons.wikimedia.org/w/api.php?action=query&titles=File:${fileName}&prop=imageinfo&iiprop=url&format=json&origin=*`);
+      const commonsData = await commonsResp.json();
+      const page = Object.values(commonsData.query.pages)[0];
+      const imgUrl = page.imageinfo?.[0]?.url;
+      if (imgUrl) {
+        imgHtml = `<img src="${imgUrl}" style="max-width:100%; margin-bottom:10px;" />`;
+      }
+    }
+
+    console.log(`✅ Fetched: ${title}`);
+
+    const infoPanel = document.getElementById("infoPanel");
+    infoPanel.innerHTML = `
+      <h3>${title}</h3>
+      ${imgHtml}
+      <p>${description}</p>
+      <a href="${wikidataUrl}" target="_blank">View on Wikidata</a>
+    `;
+    infoPanel.style.display = "block";
+  } catch (err) {
+    console.error("🚨 Wikidata fetch error:", err);
+    document.getElementById("infoPanel").style.display = "none";
   }
+}
 
-  function updateCarPosition() {
+function updateCarPosition() {
+  try {
+    console.log("🌀 updateCarPosition running");
+
     const latlng = playerMarker.getLatLng();
+    let newLat = latlng.lat;
+    let newLng = latlng.lng;
 
-    if (touchTarget) {
-      const mapSize = map.getSize();
+    if (window.innerWidth <= 768 && touchTarget) {
       const mapCenter = map.latLngToContainerPoint(latlng);
       const touchPoint = L.point(touchTarget.clientX, touchTarget.clientY);
       const angle = Math.atan2(touchPoint.x - mapCenter.x, mapCenter.y - touchPoint.y);
       const targetHeading = angle * 180 / Math.PI;
-      let delta = ((targetHeading - carHeading + 540) % 360) - 180;
-      carHeading += delta * 0.005; // smoother turning
+      const delta = ((targetHeading - carHeading + 540) % 360) - 180;
+      carHeading += delta * 0.05;
       const targetSpeed = 0.2;
-      carSpeed += (targetSpeed - carSpeed) * 0.005; // smooth acceleration
-      let delta = ((targetHeading - carHeading + 540) % 360) - 180;
-      carHeading += delta * 0.1; // adjust 10% of the way toward target
-      carSpeed += 0.01;
+      carSpeed += (targetSpeed - carSpeed) * 0.01;
     }
 
     const headingRad = carHeading * Math.PI / 180;
-    let newLat = latlng.lat, newLng = latlng.lng;
 
     if (Math.abs(carSpeed) > 0.001) {
       carSpeed = Math.max(Math.min(carSpeed, 4.0), -4.0);
@@ -192,6 +187,8 @@
       newLat += distance * Math.cos(headingRad);
       newLng += distance * Math.sin(headingRad);
     }
+
+    console.log(`🚗 Pos: ${newLat.toFixed(5)}, ${newLng.toFixed(5)} | Speed: ${carSpeed.toFixed(3)}`);
 
     newLat = Math.max(-85, Math.min(85, newLat));
     newLng = ((newLng + 180) % 360 + 360) % 360 - 180;
@@ -221,17 +218,28 @@
     }
 
     map.panTo([newLat, newLng], { animate: false });
-    GameState.player.lat = newLat;
-    GameState.player.lng = newLng;
 
-    const now = Date.now();
-    if (carSpeed !== 0 && (now - lastFetchTime > 3000)) {
-      fetchWikipediaContent(newLat, newLng);
-      lastFetchTime = now;
-    }
+const oldLat = GameState.player.lat;
+const oldLng = GameState.player.lng;
+const moved = Math.hypot(newLat - oldLat, newLng - oldLng) > 0.0005;
+const now = Date.now();
+
+console.log(`📦 moved: ${moved}, deltaT: ${now - lastFetchTime}`);
+
+if (carSpeed !== 0 && now - lastFetchTime > 1000 && moved) {
+  lastFetchTime = now;
+  fetchWikidataContent(newLat, newLng);
+}
+
+GameState.player.lat = newLat;
+GameState.player.lng = newLng;
+
 
     requestAnimationFrame(updateCarPosition);
+  } catch (e) {
+    console.error("💥 updateCarPosition error:", e);
   }
+}
 
   updateCarPosition();
 
