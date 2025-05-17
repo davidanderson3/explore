@@ -174,7 +174,7 @@ function updateCarPosition() {
       const angle = Math.atan2(touchPoint.x - mapCenter.x, mapCenter.y - touchPoint.y);
       const targetHeading = angle * 180 / Math.PI;
       const delta = ((targetHeading - carHeading + 540) % 360) - 180;
-      carHeading += delta * 0.05;
+      carHeading += delta * 0.02;
       const targetSpeed = 0.1;
       carSpeed += (targetSpeed - carSpeed) * 0.003;
     }
