@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>World Explorer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <style>
     html, body, #map {
@@ -39,6 +40,20 @@
 <body>
   <div id="map"></div>
   <div id="infoPanel"></div>
+
+  <div id="instructions" style="position: fixed; bottom: 10px; left: 10px; background: rgba(255,255,255,0.8); padding: 10px; font-family: sans-serif; z-index: 9999;">
+    <span id="desktopInstructions">Use arrow keys to drive.</span>
+    <div id="mobileControls" style="display:none;">
+      <button id="up">▲</button><br>
+      <button id="left">◀</button>
+      <button id="right">▶</button><br>
+      <button id="down">▼</button>
+    </div>
+  </div>
+  <div id="exploreButtons" style="position: fixed; bottom: 10px; left: 300px; background: rgba(255,255,255,0.8); padding: 10px; font-family: sans-serif; z-index: 9999; display: flex; gap: 10px;">
+    <button id="myLocation">Explore My Location</button>
+    <button id="randomLocation">Explore Random Location</button>
+  </div>
 
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
@@ -85,7 +100,7 @@
         zoomSnap: 0.25,
         minZoom: 15,
         maxZoom: 17
-    }).setView([GameState.player.lat, GameState.player.lng], 17);
+      });
 
       const baseLayers = {
         "Streets": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap contributors' }),
@@ -104,11 +119,22 @@
         })
       }).addTo(map);
 
+      map.setView(playerMarker.getLatLng(), 17, { animate: false });
+
+      // Show/hide controls depending on screen size
+      if (window.innerWidth <= 768) {
+        document.getElementById('mobileControls').style.display = 'block';
+        document.getElementById('desktopInstructions').style.display = 'none';
+      }
+
+      window.addEventListener('load', () => map.invalidateSize());
+      window.addEventListener('orientationchange', () => setTimeout(() => map.invalidateSize(), 500));
+
       let carHeading = 0, carSpeed = 0, accelerating = false, lastFetchTime = 0;
 
       document.addEventListener('keydown', (e) => {
-        if (e.key === 'ArrowUp') { const zoomFactor = 17 / map.getZoom(); carSpeed += 0.03 * zoomFactor; accelerating = true; }
-        if (e.key === 'ArrowDown') { const zoomFactor = 17 / map.getZoom(); carSpeed -= 0.03 * zoomFactor; accelerating = true; }
+        if (e.key === 'ArrowUp') { carSpeed += 0.03; accelerating = true; }
+        if (e.key === 'ArrowDown') { carSpeed -= 0.03; accelerating = true; }
         if (e.key === 'ArrowLeft') carHeading -= 8;
         if (e.key === 'ArrowRight') carHeading += 8;
       });
@@ -117,13 +143,23 @@
         if (e.key === 'ArrowUp' || e.key === 'ArrowDown') accelerating = false;
       });
 
+      // Touch controls for mobile
+      document.getElementById('up').addEventListener('touchstart', () => { carSpeed += 0.03; accelerating = true; });
+      document.getElementById('down').addEventListener('touchstart', () => { carSpeed -= 0.03; accelerating = true; });
+      document.getElementById('left').addEventListener('touchstart', () => { carHeading -= 8; });
+      document.getElementById('right').addEventListener('touchstart', () => { carHeading += 8; });
+
+      setInterval(() => {
+        if (!accelerating) carSpeed *= 0.99;
+        accelerating = false;
+      }, 50);
+
       function updateCarPosition() {
         const latlng = playerMarker.getLatLng();
         const headingRad = carHeading * Math.PI / 180;
         let newLat = latlng.lat, newLng = latlng.lng;
 
         if (Math.abs(carSpeed) > 0.001) {
-          // Cap maximum speed
           if (carSpeed > 4.0) carSpeed = 4.0;
           if (carSpeed < -4.0) carSpeed = -4.0;
           const distance = carSpeed * 0.001;
@@ -131,9 +167,12 @@
           newLng += distance * Math.sin(headingRad);
         }
 
+        newLat = Math.max(-85, Math.min(85, newLat));
+        newLng = ((newLng + 180) % 360 + 360) % 360 - 180;
+
         const pt = turf.point([newLng, newLat]);
-const isLand = landPolygons.features.some(feature => turf.booleanPointInPolygon(pt, feature));
-const onWater = !isLand;
+        const isLand = landPolygons.features.some(feature => turf.booleanPointInPolygon(pt, feature));
+        const onWater = !isLand;
         const newIcon = onWater ? 'assets/boat.png' : 'assets/car.png';
 
         if (newIcon !== currentIcon) {
@@ -165,19 +204,21 @@ const onWater = !isLand;
           lastFetchTime = now;
         }
 
-        if (!accelerating) carSpeed *= 0.99;
         requestAnimationFrame(updateCarPosition);
       }
 
       async function fetchWikipediaContent(lat, lon) {
         try {
+          const infoPanel = document.getElementById('infoPanel');
+          infoPanel.innerHTML = 'Loading...';
+          infoPanel.style.display = 'block';
+
           const response = await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${lat}%7C${lon}&gsradius=10000&gslimit=1&format=json&origin=*`);
           const data = await response.json();
           const pages = data.query.geosearch;
 
           if (pages.length > 0) {
             const page = pages[0];
-            L.marker([page.lat, page.lon]).addTo(map).bindPopup(page.title);
             const title = page.title;
             const urlTitle = encodeURIComponent(title.replace(/ /g, '_'));
             const pageResponse = await fetch(`https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&titles=${urlTitle}&format=json&origin=*`);
@@ -185,57 +226,52 @@ const onWater = !isLand;
             const pageId = Object.keys(pageData.query.pages)[0];
             const extract = pageData.query.pages[pageId].extract;
 
-// Check for special categories
-let isSpecial = false;
-try {
-  const catResponse = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${urlTitle}&prop=categories&format=json&origin=*`);
-  const catData = await catResponse.json();
-  const categories = catData.query.pages[pageId].categories?.map(c => c.title.toLowerCase()) || [];
-  const specialCategories = ['world heritage', 'historic landmark', 'national monument', 'unesco', 'natural wonder', 'architectural landmark'];
-  isSpecial = categories.some(cat => specialCategories.some(sc => cat.includes(sc)));
-} catch {}
+            let isSpecial = false;
+            try {
+              const catResponse = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${urlTitle}&prop=categories&format=json&origin=*`);
+              const catData = await catResponse.json();
+              const categories = catData.query.pages[pageId].categories?.map(c => c.title.toLowerCase()) || [];
+              const specialCategories = ['world heritage', 'historic landmark', 'national monument', 'unesco', 'natural wonder', 'architectural landmark'];
+              isSpecial = categories.some(cat => specialCategories.some(sc => cat.includes(sc)));
+            } catch {}
 
-if (isSpecial) {
-  const specialMsg = document.createElement('div');
-  specialMsg.textContent = '★ SPECIAL SITE! ★';
-  specialMsg.style.position = 'absolute';
-  specialMsg.style.top = '50%';
-  specialMsg.style.left = '50%';
-  specialMsg.style.transform = 'translate(-50%, -50%)';
-  specialMsg.style.background = 'gold';
-  specialMsg.style.padding = '20px';
-  specialMsg.style.fontSize = '24px';
-  specialMsg.style.fontWeight = 'bold';
-  specialMsg.style.border = '3px solid black';
-  specialMsg.style.borderRadius = '10px';
-  specialMsg.style.zIndex = '2000';
-  document.body.appendChild(specialMsg);
+            if (isSpecial) {
+              const specialMsg = document.createElement('div');
+              specialMsg.textContent = '★ SPECIAL SITE! ★';
+              specialMsg.style.position = 'absolute';
+              specialMsg.style.top = '50%';
+              specialMsg.style.left = '50%';
+              specialMsg.style.transform = 'translate(-50%, -50%)';
+              specialMsg.style.background = 'gold';
+              specialMsg.style.padding = '20px';
+              specialMsg.style.fontSize = '24px';
+              specialMsg.style.fontWeight = 'bold';
+              specialMsg.style.border = '3px solid black';
+              specialMsg.style.borderRadius = '10px';
+              specialMsg.style.zIndex = '2000';
+              document.body.appendChild(specialMsg);
 
-  specialMsg.animate([
-    { transform: 'translate(-50%, -50%) scale(1)', opacity: 1 },
-    { transform: 'translate(-50%, -50%) scale(1.5)', opacity: 0 }
-  ], {
-    duration: 2000,
-    easing: 'ease-out'
-  });
+              specialMsg.animate([
+                { transform: 'translate(-50%, -50%) scale(1)', opacity: 1 },
+                { transform: 'translate(-50%, -50%) scale(1.5)', opacity: 0 }
+              ], { duration: 2000, easing: 'ease-out' });
 
-  setTimeout(() => document.body.removeChild(specialMsg), 2000);
-}
+              setTimeout(() => document.body.removeChild(specialMsg), 2000);
+            }
 
-            const infoPanel = document.getElementById('infoPanel');
             let imgHtml = '';
             try {
               const imgResponse = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${urlTitle}&prop=pageimages&format=json&pithumbsize=300&origin=*`);
               const imgData = await imgResponse.json();
               const imgPageId = Object.keys(imgData.query.pages)[0];
-              const img = imgData.query.pages[imgPageId].thumbnail ? imgData.query.pages[imgPageId].thumbnail.source : '';
+              const img = imgData.query.pages?.[imgPageId]?.thumbnail?.source || '';
               if (img) imgHtml = `<img src='${img}' style='max-width:100%; margin-bottom:10px;'>`;
             } catch {}
 
             infoPanel.innerHTML = `<h3>${title}</h3>${imgHtml}<p>${extract}</p><a href='https://en.wikipedia.org/wiki/${urlTitle}' target='_blank'>Read more on Wikipedia</a>`;
             infoPanel.style.display = 'block';
           } else {
-            document.getElementById('infoPanel').style.display = 'none';
+            infoPanel.style.display = 'none';
           }
         } catch (err) {
           console.error(err);
@@ -243,7 +279,6 @@ if (isSpecial) {
         }
       }
 
-      map.setView(playerMarker.getLatLng(), 17, { animate: false });
       updateCarPosition();
 
       document.getElementById('myLocation').onclick = () => {
@@ -269,28 +304,5 @@ if (isSpecial) {
 
     })();
   </script>
-<div id="instructions" style="position: fixed; bottom: 10px; left: 10px; background: rgba(255,255,255,0.8); padding: 10px; font-family: sans-serif; z-index: 9999;">
-  <span id="desktopInstructions">Use arrow keys to drive.</span>
-  <div id="mobileControls" style="display:none;">
-    <button id="up">▲</button><br>
-    <button id="left">◀</button>
-    <button id="right">▶</button><br>
-    <button id="down">▼</button>
-  </div>
-</div>
-<div id="exploreButtons" style="position: fixed; bottom: 10px; left: 300px; background: rgba(255,255,255,0.8); padding: 10px; font-family: sans-serif; z-index: 9999; display: flex; gap: 10px;">
-  <button id="myLocation">Explore My Location</button>
-  <button id="randomLocation">Explore Random Location</button>
-</div> style="position: fixed; bottom: 10px; left: 300px; background: rgba(255,255,255,0.8); padding: 10px; font-family: sans-serif; z-index: 9999; display: flex; gap: 10px;">
-  <button id="myLocation">Explore My Location</button>
-  <button id="randomLocation">Explore Random Location</button>
-</div>
-  </div>
-;
-    document.getElementById('left').onclick = () => { carHeading -= 8; };
-    document.getElementById('right').onclick = () => { carHeading += 8; };
-    document.getElementById('down').onclick = () => { carSpeed -= 0.03; accelerating = true; };
-}
-</script>
 </body>
 </html>
