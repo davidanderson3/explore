@@ -1,13 +1,16 @@
 (async function init() {
-  let landPolygons;
   const keysPressed = {};
+  const projectiles = [];
+
+  const canvas = document.getElementById("mapSampler");
+  const ctx = canvas.getContext("2d");
 
   async function loadGeoJSON(url) {
     const response = await fetch(url);
     return await response.json();
   }
 
-  landPolygons = await loadGeoJSON('assets/land.geojson');
+  const landPolygons = await loadGeoJSON('assets/land.geojson');
   const cities = await loadGeoJSON('assets/cities.geojson');
 
   function getRandomCityPoint(cities) {
@@ -24,15 +27,16 @@
   const map = L.map('map', {
     zoomControl: true,
     zoomSnap: 0.25,
-    minZoom: 15,
-    maxZoom: 17,
+    minZoom: 12,
+    maxZoom: 14,
     preferCanvas: true,
-    keepBuffer: 8
+    keepBuffer: 16
   });
 
-  const baseLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors',
-    maxZoom: 17
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    subdomains: ['a', 'b', 'c'],
+    maxZoom: 17,
+    crossOrigin: true
   }).addTo(map);
 
   let currentIcon = 'assets/car.png';
@@ -52,15 +56,27 @@
   let carHeading = 0, carSpeed = 0, accelerating = false, lastFetchTime = 0;
   let touchTarget = null;
 
-  document.addEventListener('keydown', (e) => {
-    keysPressed[e.key] = true;
-    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') accelerating = true;
-  });
+document.addEventListener('keydown', (e) => {
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
+    e.preventDefault(); // ✅ stop arrow keys and spacebar from scrolling the page
+  }
 
-  document.addEventListener('keyup', (e) => {
-    keysPressed[e.key] = false;
-    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') accelerating = false;
-  });
+  keysPressed[e.key] = true;
+
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') accelerating = true;
+  if (e.code === 'Space') fireProjectile();
+});
+
+document.addEventListener('keyup', (e) => {
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
+    e.preventDefault();
+  }
+
+  keysPressed[e.key] = false;
+
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') accelerating = false;
+});
+
 
   if (window.innerWidth <= 768) {
     document.getElementById('desktopInstructions').style.display = 'none';
@@ -74,104 +90,143 @@
         accelerating = true;
       }
     });
-
     document.addEventListener('touchmove', (e) => {
       if (e.touches.length === 1) {
         touchTarget = e.touches[0];
       }
     });
-
     document.addEventListener('touchend', () => {
       touchTarget = null;
       accelerating = false;
     });
   }
 
+  function fireProjectile() {
+    const { lat, lng } = playerMarker.getLatLng();
+    const headingRad = carHeading * Math.PI / 180;
+    const speed = 0.01;
+
+    const projectile = {
+      lat,
+      lng,
+      dx: speed * Math.cos(headingRad),
+      dy: speed * Math.sin(headingRad),
+      marker: L.circleMarker([lat, lng], {
+        radius: 4,
+        color: 'red',
+        fillColor: 'red',
+        fillOpacity: 0.9,
+        weight: 1
+      }).addTo(map),
+      lifetime: 100
+    };
+
+    projectiles.push(projectile);
+  }
+
   setInterval(() => {
-    if (!accelerating) {
-      carSpeed += (0 - carSpeed) * 0.1;
-    }
+    if (!accelerating) carSpeed += (0 - carSpeed) * 0.1;
   }, 50);
 
-  async function fetchWikidataContent(lat, lon) {
-    console.log(`🔎 Attempting fetch for (${lat.toFixed(5)}, ${lon.toFixed(5)})`);
+  async function isBlueUnderCar(lat, lng) {
+    const zoom = map.getZoom();
+    const tileSize = 256;
+
+    const tileX = Math.floor((lng + 180) / 360 * Math.pow(2, zoom));
+    const tileY = Math.floor(
+      (1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom)
+    );
+
+    const tileUrl = `https://a.tile.openstreetmap.org/${zoom}/${tileX}/${tileY}.png`;
+
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        ctx.clearRect(0, 0, tileSize, tileSize);
+        ctx.drawImage(img, 0, 0, tileSize, tileSize);
+
+        const n = Math.pow(2, zoom);
+        const xtileOffset = ((lng + 180) / 360 * n - tileX) * tileSize;
+        const ytileOffset = (
+          (1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * n - tileY
+        ) * tileSize;
+
+        const pixel = ctx.getImageData(xtileOffset, ytileOffset, 1, 1).data;
+        const [r, g, b] = pixel;
+        const isBlue = b > 150 && r < 120 && g < 130;
+        resolve(isBlue);
+      };
+      img.onerror = () => resolve(false);
+      img.src = tileUrl;
+    });
+  }
+
+  async function fetchWikipediaContent(lat, lon) {
+    console.log(`🔎 Fetching from Wikipedia near (${lat.toFixed(5)}, ${lon.toFixed(5)})`);
     try {
-      const query = `
-        SELECT ?item ?itemLabel ?description ?image WHERE {
-          SERVICE wikibase:around {
-            ?item wdt:P625 ?coord .
-            bd:serviceParam wikibase:center "Point(${lon} ${lat})"^^geo:wktLiteral .
-            bd:serviceParam wikibase:radius "10" .
-          }
-          OPTIONAL { ?item schema:description ?description FILTER(LANG(?description) = "en") }
-          OPTIONAL { ?item wdt:P18 ?image }
-          SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
-        }
-        LIMIT 1
-      `;
+      const geoUrl = `https://en.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${lat}|${lon}&gsradius=3000&gslimit=1&format=json&origin=*`;
+      const geoResp = await fetch(geoUrl);
+      const geoData = await geoResp.json();
+      const pages = geoData.query.geosearch;
 
-      const response = await fetch("https://query.wikidata.org/sparql", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/sparql-query",
-          "Accept": "application/sparql-results+json"
-        },
-        body: query
-      });
-
-      const data = await response.json();
-      const result = data.results.bindings[0];
-      if (!result) {
-        console.log("⚠️ No result from Wikidata.");
+      if (!pages.length) {
+        console.log("⚠️ No nearby Wikipedia results.");
         document.getElementById("infoPanel").style.display = "none";
         return;
       }
 
-      const title = result.itemLabel.value;
-      const description = result.description?.value || "No description available.";
-      const wikidataUrl = result.item.value;
+      const page = pages[0];
+      const title = page.title;
+      const urlTitle = encodeURIComponent(title.replace(/ /g, "_"));
+
+      L.marker([page.lat, page.lon], {
+        title: title
+      }).addTo(map).bindPopup(
+        `<strong>${title}</strong><br><a href="https://en.wikipedia.org/wiki/${urlTitle}" target="_blank">Open on Wikipedia</a>`
+      );
+
+      const extractUrl = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&titles=${urlTitle}&format=json&origin=*`;
+      const extractResp = await fetch(extractUrl);
+      const extractData = await extractResp.json();
+      const pageId = Object.keys(extractData.query.pages)[0];
+      const extract = extractData.query.pages[pageId].extract;
 
       let imgHtml = "";
-      if (result.image) {
-        const fileName = result.image.value.split("/").pop();
-        const commonsResp = await fetch(`https://commons.wikimedia.org/w/api.php?action=query&titles=File:${fileName}&prop=imageinfo&iiprop=url&format=json&origin=*`);
-        const commonsData = await commonsResp.json();
-        const page = Object.values(commonsData.query.pages)[0];
-        const imgUrl = page.imageinfo?.[0]?.url;
-        if (imgUrl) {
-          imgHtml = `<img src="${imgUrl}" style="max-width:100%; margin-bottom:10px;" />`;
-        }
-      }
-
-      console.log(`✅ Fetched: ${title}`);
+      try {
+        const imgResp = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${urlTitle}&prop=pageimages&format=json&pithumbsize=300&origin=*`);
+        const imgData = await imgResp.json();
+        const imgPageId = Object.keys(imgData.query.pages)[0];
+        const img = imgData.query.pages[imgPageId].thumbnail?.source;
+        if (img) imgHtml = `<img src="${img}" style="max-width:100%; margin-bottom:10px;">`;
+      } catch {}
 
       const infoPanel = document.getElementById("infoPanel");
       infoPanel.innerHTML = `
         <h3>${title}</h3>
         ${imgHtml}
-        <p>${description}</p>
-        <a href="${wikidataUrl}" target="_blank">View on Wikidata</a>
+        <p>${extract}</p>
+        <a href="https://en.wikipedia.org/wiki/${urlTitle}" target="_blank">Read more on Wikipedia</a>
       `;
       infoPanel.style.display = "block";
+
     } catch (err) {
-      console.error("🚨 Wikidata fetch error:", err);
+      console.error("🚨 Wikipedia fetch error:", err);
       document.getElementById("infoPanel").style.display = "none";
     }
   }
 
-  function updateCarPosition() {
+  async function updateCarPosition() {
     try {
       const latlng = playerMarker.getLatLng();
       let newLat = latlng.lat;
       let newLng = latlng.lng;
 
-// 🕹️ Keyboard controls
-if (keysPressed['ArrowLeft']) carHeading -= 1;
-if (keysPressed['ArrowRight']) carHeading += 1;
-if (keysPressed['ArrowUp']) carSpeed += 0.009; // slower acceleration
-if (keysPressed['ArrowDown']) carSpeed -= 0.009;
+      if (keysPressed['ArrowLeft']) carHeading -= 1;
+      if (keysPressed['ArrowRight']) carHeading += 1;
+      if (keysPressed['ArrowUp']) carSpeed += 0.001;
+      if (keysPressed['ArrowDown']) carSpeed -= 0.001;
 
-      // 📱 Touch controls
       if (window.innerWidth <= 768 && touchTarget) {
         const mapCenter = map.latLngToContainerPoint(latlng);
         const touchPoint = L.point(touchTarget.clientX, touchTarget.clientY);
@@ -186,7 +241,7 @@ if (keysPressed['ArrowDown']) carSpeed -= 0.009;
       const headingRad = carHeading * Math.PI / 180;
 
       if (Math.abs(carSpeed) > 0.001) {
-        carSpeed = Math.max(Math.min(carSpeed, 4.0), -4.0);
+        carSpeed = Math.max(Math.min(carSpeed, 2.5), -2.5);
         const distance = carSpeed * 0.001;
         newLat += distance * Math.cos(headingRad);
         newLng += distance * Math.sin(headingRad);
@@ -195,19 +250,14 @@ if (keysPressed['ArrowDown']) carSpeed -= 0.009;
       newLat = Math.max(-85, Math.min(85, newLat));
       newLng = ((newLng + 180) % 360 + 360) % 360 - 180;
 
-      const pt = turf.point([newLng, newLat]);
-      const isLand = landPolygons.features.some(feature => turf.booleanPointInPolygon(pt, feature));
-      const onWater = !isLand;
-      const newIcon = onWater ? 'assets/boat.png' : 'assets/car.png';
-
-      if (newIcon !== currentIcon) {
-        currentIcon = newIcon;
-        playerMarker.setIcon(L.divIcon({
-          html: `<img src="${currentIcon}" style="width:40px;height:40px;transform: rotate(${carHeading}deg); transform-origin: center center;">`,
-          iconSize: [40, 40],
-          className: ''
-        }));
-      }
+if (currentIcon !== 'assets/car.png') {
+  currentIcon = 'assets/car.png';
+  playerMarker.setIcon(L.divIcon({
+    html: `<img src="${currentIcon}" style="width:40px;height:40px;transform: rotate(${carHeading}deg); transform-origin: center center;">`,
+    iconSize: [40, 40],
+    className: ''
+  }));
+}
 
       playerMarker.setLatLng([newLat, newLng]);
       const iconElement = playerMarker.getElement();
@@ -219,30 +269,30 @@ if (keysPressed['ArrowDown']) carSpeed -= 0.009;
         }
       }
 
-// Calculate how far the car has drifted from the map center
-const center = map.getCenter();
-const dx = Math.abs(center.lat - newLat);
-const dy = Math.abs(center.lng - newLng);
+      const center = map.getCenter();
+      if (Math.abs(center.lat - newLat) > 0.0025 || Math.abs(center.lng - newLng) > 0.0025) {
+        map.panTo([newLat, newLng], { animate: true });
+      }
 
-// Only pan if the marker moves off-center significantly (e.g., >0.002 degrees)
-if (dx > 0.002 || dy > 0.002) {
-  map.panTo([newLat, newLng], { animate: true }); // or animate: false if needed
-}
-
-
-      const oldLat = GameState.player.lat;
-      const oldLng = GameState.player.lng;
-      const moved = Math.hypot(newLat - oldLat, newLng - oldLng) > 0.0005;
       const now = Date.now();
-
       if (now - lastFetchTime > 3000) {
-        console.log("🧪 FORCED FETCH TRIGGER");
         lastFetchTime = now;
-        fetchWikidataContent(newLat, newLng);
+        fetchWikipediaContent(newLat, newLng);
       }
 
       GameState.player.lat = newLat;
       GameState.player.lng = newLng;
+
+      for (let i = projectiles.length - 1; i >= 0; i--) {
+        const p = projectiles[i];
+        p.lat += p.dy;
+        p.lng += p.dx;
+        p.marker.setLatLng([p.lat, p.lng]);
+        if (--p.lifetime <= 0) {
+          map.removeLayer(p.marker);
+          projectiles.splice(i, 1);
+        }
+      }
 
       requestAnimationFrame(updateCarPosition);
     } catch (e) {
