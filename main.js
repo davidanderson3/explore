@@ -186,8 +186,8 @@ document.addEventListener('keyup', (e) => {
 
       if (keysPressed['ArrowLeft']) carHeading -= 1;
       if (keysPressed['ArrowRight']) carHeading += 1;
-      if (keysPressed['ArrowUp']) carSpeed += 0.002;
-      if (keysPressed['ArrowDown']) carSpeed -= 0.002;
+      if (keysPressed['ArrowUp']) carSpeed += 0.003;
+      if (keysPressed['ArrowDown']) carSpeed -= 0.003;
 
       if (window.innerWidth <= 768 && touchTarget) {
         const mapCenter = map.latLngToContainerPoint(latlng);
@@ -196,7 +196,7 @@ document.addEventListener('keyup', (e) => {
         const targetHeading = angle * 180 / Math.PI;
         const delta = ((targetHeading - carHeading + 540) % 360) - 180;
         carHeading += delta * 0.01;
-        const targetSpeed = 0.05;
+        const targetSpeed = 0.06;
         carSpeed += (targetSpeed - carSpeed) * 0.001;
       }
 
