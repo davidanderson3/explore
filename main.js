@@ -2,15 +2,11 @@
   const keysPressed = {};
   const projectiles = [];
 
-  const canvas = document.getElementById("mapSampler");
-  const ctx = canvas.getContext("2d");
-
   async function loadGeoJSON(url) {
     const response = await fetch(url);
     return await response.json();
   }
 
-  const landPolygons = await loadGeoJSON('assets/land.geojson');
   const cities = await loadGeoJSON('assets/cities.geojson');
 
   function getRandomCityPoint(cities) {
@@ -128,40 +124,6 @@ document.addEventListener('keyup', (e) => {
     if (!accelerating) carSpeed += (0 - carSpeed) * 0.1;
   }, 50);
 
-  async function isBlueUnderCar(lat, lng) {
-    const zoom = map.getZoom();
-    const tileSize = 256;
-
-    const tileX = Math.floor((lng + 180) / 360 * Math.pow(2, zoom));
-    const tileY = Math.floor(
-      (1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom)
-    );
-
-    const tileUrl = `https://a.tile.openstreetmap.org/${zoom}/${tileX}/${tileY}.png`;
-
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.onload = () => {
-        ctx.clearRect(0, 0, tileSize, tileSize);
-        ctx.drawImage(img, 0, 0, tileSize, tileSize);
-
-        const n = Math.pow(2, zoom);
-        const xtileOffset = ((lng + 180) / 360 * n - tileX) * tileSize;
-        const ytileOffset = (
-          (1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * n - tileY
-        ) * tileSize;
-
-        const pixel = ctx.getImageData(xtileOffset, ytileOffset, 1, 1).data;
-        const [r, g, b] = pixel;
-        const isBlue = b > 150 && r < 120 && g < 130;
-        resolve(isBlue);
-      };
-      img.onerror = () => resolve(false);
-      img.src = tileUrl;
-    });
-  }
-
   async function fetchWikipediaContent(lat, lon) {
     console.log(`🔎 Fetching from Wikipedia near (${lat.toFixed(5)}, ${lon.toFixed(5)})`);
     try {
@@ -224,8 +186,8 @@ document.addEventListener('keyup', (e) => {
 
       if (keysPressed['ArrowLeft']) carHeading -= 1;
       if (keysPressed['ArrowRight']) carHeading += 1;
-      if (keysPressed['ArrowUp']) carSpeed += 0.001;
-      if (keysPressed['ArrowDown']) carSpeed -= 0.001;
+      if (keysPressed['ArrowUp']) carSpeed += 0.002;
+      if (keysPressed['ArrowDown']) carSpeed -= 0.002;
 
       if (window.innerWidth <= 768 && touchTarget) {
         const mapCenter = map.latLngToContainerPoint(latlng);
@@ -241,7 +203,7 @@ document.addEventListener('keyup', (e) => {
       const headingRad = carHeading * Math.PI / 180;
 
       if (Math.abs(carSpeed) > 0.001) {
-        carSpeed = Math.max(Math.min(carSpeed, 2.5), -2.5);
+        carSpeed = Math.max(Math.min(carSpeed, 5), -5);
         const distance = carSpeed * 0.001;
         newLat += distance * Math.cos(headingRad);
         newLng += distance * Math.sin(headingRad);
