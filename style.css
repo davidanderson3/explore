@@ -80,7 +80,9 @@ html, body, #map {
   }
 }
 
-
+  .leaflet-control-zoom {
+    display: none !important;
+  }
 #exploreButtons {
   position: fixed;
   bottom: 10px;

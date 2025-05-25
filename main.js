@@ -1,6 +1,7 @@
 (async function init() {
   const keysPressed = {};
   const projectiles = [];
+  const enemyProjectiles = [];
 
   async function loadGeoJSON(url) {
     const response = await fetch(url);
@@ -9,19 +10,38 @@
 
   const cities = await loadGeoJSON('assets/cities.geojson');
 
-  function getRandomCityPoint(cities) {
-    const city = cities.features[Math.floor(Math.random() * cities.features.length)];
-    return {
-      lat: city.geometry.coordinates[1],
-      lng: city.geometry.coordinates[0]
-    };
+  const cityFeatures = cities.features;
+  const startCityIdx = Math.floor(Math.random() * cityFeatures.length);
+  const startCity = cityFeatures[startCityIdx];
+
+  // Find a nearby city (closest, but not the same)
+  let minDist = Infinity;
+  let destCity = null;
+  for (let i = 0; i < cityFeatures.length; i++) {
+    if (i === startCityIdx) continue;
+    const c = cityFeatures[i];
+    const dLat = c.geometry.coordinates[1] - startCity.geometry.coordinates[1];
+    const dLng = c.geometry.coordinates[0] - startCity.geometry.coordinates[0];
+    const dist = Math.hypot(dLat, dLng);
+    if (dist < minDist) {
+      minDist = dist;
+      destCity = c;
+    }
   }
 
-  const start = getRandomCityPoint(cities);
+  // Show the message
+  document.getElementById('missionMessage').textContent =
+    `Mission starts in ${startCity.properties.NAME}. Your job is to get to ${destCity.properties.NAME}. Good luck!`;
+
+  // Use startCity for your spawn point:
+  const start = {
+    lat: startCity.geometry.coordinates[1],
+    lng: startCity.geometry.coordinates[0]
+  };
   const GameState = { player: { lat: start.lat, lng: start.lng } };
 
   const map = L.map('map', {
-    zoomControl: true,
+    zoomControl: false,
     zoomSnap: 0.25,
     minZoom: 12,
     maxZoom: 14,
@@ -151,7 +171,7 @@ document.addEventListener('keyup', (e) => {
   }
 
   setInterval(() => {
-    if (!accelerating) carSpeed += (0 - carSpeed) * 0.1;
+    if (!accelerating) carSpeed += (0 - carSpeed) * 0.03; // Less friction, car coasts longer
   }, 50);
 
   async function fetchWikipediaContent(lat, lon) {
@@ -195,7 +215,9 @@ document.addEventListener('keyup', (e) => {
 
       const infoPanel = document.getElementById("infoPanel");
       infoPanel.innerHTML = `
-        <h3>${title}</h3>
+        <div style="margin-top: 24px;">
+          <h3>${title}</h3>
+        </div>
         ${imgHtml}
         <p>${extract}</p>
         <a href="https://en.wikipedia.org/wiki/${urlTitle}" target="_blank">Read more on Wikipedia</a>
@@ -214,12 +236,14 @@ document.addEventListener('keyup', (e) => {
   let enemyMoveAngle = 0;
   let enemyMoveRadius = 0.008;
   let enemyMoveSpeed = 0.015;
+  let enemyVelLat = 0;
+  let enemyVelLng = 0;
 
   // Spawn the UFO near the player
   function spawnEnemy() {
     const playerPos = playerMarker.getLatLng();
-    const centerLat = playerPos.lat + (Math.random() - 0.5) * 0.01;
-    const centerLng = playerPos.lng + (Math.random() - 0.5) * 0.01;
+    const centerLat = playerPos.lat + (Math.random() - 0.5) * 0.03;
+    const centerLng = playerPos.lng + (Math.random() - 0.5) * 0.03;
 
     enemy = {
       centerLat,
@@ -256,16 +280,37 @@ document.addEventListener('keyup', (e) => {
   // UFO movement logic
   function moveEnemyUFO() {
     if (!enemy) return;
-    enemyMoveAngle += enemyMoveSpeed;
-    enemy.lat = enemy.centerLat + enemyMoveRadius * Math.cos(enemyMoveAngle);
-    enemy.lng = enemy.centerLng + enemyMoveRadius * Math.sin(enemyMoveAngle);
+
+    // Make UFO less erratic and slower
+    enemyVelLat += (Math.random() - 0.5) * 0.00004; // was 0.00008
+    enemyVelLng += (Math.random() - 0.5) * 0.00004; // was 0.00008
+
+    // Lower max velocity for slower UFO
+    const maxVel = 0.0004; // was 0.0007
+    enemyVelLat = Math.max(-maxVel, Math.min(maxVel, enemyVelLat));
+    enemyVelLng = Math.max(-maxVel, Math.min(maxVel, enemyVelLng));
+
+    // Move the UFO
+    enemy.lat += enemyVelLat;
+    enemy.lng += enemyVelLng;
+
+    // Optionally, keep the UFO within a certain distance of its center
+    const dLat = enemy.lat - enemy.centerLat;
+    const dLng = enemy.lng - enemy.centerLng;
+    const maxDist = 0.018;
+    if (Math.hypot(dLat, dLng) > maxDist) {
+      // Steer back toward center
+      enemyVelLat -= dLat * 0.01;
+      enemyVelLng -= dLng * 0.01;
+    }
+
     if (enemyMarker) enemyMarker.setLatLng([enemy.lat, enemy.lng]);
     if (enemyHealthBar) {
       const healthRatio = enemy.health / enemy.maxHealth;
       const barLng1 = enemy.lng - 0.002;
       const barLng2 = enemy.lng - 0.002 + 0.004 * healthRatio;
       enemyHealthBar.setBounds([
-        [enemy.lat + 0.004, barLng1],      // Match the new offset
+        [enemy.lat + 0.004, barLng1],
         [enemy.lat + 0.0044, barLng2]
       ]);
       enemyHealthBar.bringToFront();
@@ -294,7 +339,7 @@ document.addEventListener('keyup', (e) => {
   }
 
   setInterval(() => {
-    if (!accelerating) carSpeed += (0 - carSpeed) * 0.1;
+    if (!accelerating) carSpeed += (0 - carSpeed) * 0.03; // Less friction, car coasts longer
   }, 50);
 
   async function fetchWikipediaContent(lat, lon) {
@@ -338,7 +383,9 @@ document.addEventListener('keyup', (e) => {
 
       const infoPanel = document.getElementById("infoPanel");
       infoPanel.innerHTML = `
-        <h3>${title}</h3>
+        <div style="margin-top: 24px;">
+          <h3>${title}</h3>
+        </div>
         ${imgHtml}
         <p>${extract}</p>
         <a href="https://en.wikipedia.org/wiki/${urlTitle}" target="_blank">Read more on Wikipedia</a>
@@ -429,8 +476,60 @@ if (currentIcon !== 'assets/car.png') {
         }
       }
 
+      for (let i = enemyProjectiles.length - 1; i >= 0; i--) {
+        const p = enemyProjectiles[i];
+        p.lat += p.dy;
+        p.lng += p.dx;
+        p.marker.setLatLng([p.lat, p.lng]);
+        // --- Player collision check ---
+        const playerPos = playerMarker.getLatLng();
+        if (Math.hypot(p.lat - playerPos.lat, p.lng - playerPos.lng) < 0.002) {
+          playerHealth -= 3; // Big health hit!
+          updatePlayerHealthBar();
+          map.removeLayer(p.marker);
+          enemyProjectiles.splice(i, 1);
+          if (playerHealth <= 0) {
+            alert("Game Over! You were hit too many times.");
+            playerHealth = playerMaxHealth;
+            updatePlayerHealthBar();
+          }
+          continue;
+        }
+        if (--p.lifetime <= 0) {
+          map.removeLayer(p.marker);
+          enemyProjectiles.splice(i, 1);
+        }
+      }
+
+      // Enemy randomly shoots (about once every 60 frames)
+      if (enemy && Math.random() < 0.016) {
+        enemyShootProjectile();
+      }
+
       moveEnemyUFO();
       handleEnemyHitAndRespawn();
+
+      if (enemy) {
+        const playerPos = playerMarker.getLatLng();
+        const distToUFO = Math.hypot(playerPos.lat - enemy.lat, playerPos.lng - enemy.lng);
+        if (distToUFO < 0.0025) { // Much closer, nearly touching
+          playerHealth -= 1;
+          updatePlayerHealthBar();
+          // Optional: bounce the car back a bit
+          const angleAway = Math.atan2(playerPos.lat - enemy.lat, playerPos.lng - enemy.lng);
+          const bounceDist = 0.003;
+          playerMarker.setLatLng([
+            playerPos.lat + Math.sin(angleAway) * bounceDist,
+            playerPos.lng + Math.cos(angleAway) * bounceDist
+          ]);
+          map.setView(playerMarker.getLatLng());
+          if (playerHealth <= 0) {
+            alert("Game Over! You crashed into the UFO!");
+            playerHealth = playerMaxHealth;
+            updatePlayerHealthBar();
+          }
+        }
+      }
 
       requestAnimationFrame(updateCarPosition);
     } catch (e) {
@@ -468,4 +567,178 @@ if (currentIcon !== 'assets/car.png') {
 
   // --- INITIAL ENEMY SPAWN ---
   spawnEnemy();
+
+  // Enemy randomly shoots (about once every 60 frames)
+  if (enemy && Math.random() < 0.016) {
+    enemyShootProjectile();
+  }
+
+  function enemyShootProjectile() {
+    if (!enemy) return;
+    const angle = Math.random() * 360; // Random direction
+    const headingRad = angle * Math.PI / 180;
+    const speed = 0.0003; // Very slow
+
+    const projectile = {
+      lat: enemy.lat,
+      lng: enemy.lng,
+      dx: speed * Math.sin(headingRad),
+      dy: speed * Math.cos(headingRad),
+      marker: L.circleMarker([enemy.lat, enemy.lng], {
+        radius: 7,
+        color: 'purple',
+        fillColor: 'purple',
+        fillOpacity: 0.8,
+        weight: 2
+      }).addTo(map),
+      lifetime: 300 // longer lifetime for visibility
+    };
+
+    enemyProjectiles.push(projectile);
+  }
+
+  let playerHealth = 5;
+  const playerMaxHealth = 5;
+
+  function updatePlayerHealthBar() {
+    const fill = document.getElementById('playerHealthFill');
+    if (fill) {
+      const percent = Math.max(0, playerHealth) / playerMaxHealth * 100;
+      fill.style.width = percent + "%";
+      fill.style.background = percent > 50
+        ? "linear-gradient(90deg, #43e97b, #38f9d7)"
+        : "linear-gradient(90deg, #e53935, #ffb300)";
+    }
+  }
+
+  let beaconAngle = 0;
+  let beaconTimer = 0;
+
+  function updateBeacon(playerLat, playerLng, destLat, destLng) {
+    const angleRad = Math.atan2(destLng - playerLng, destLat - playerLat);
+    const angleDeg = angleRad * 180 / Math.PI;
+
+    let direction = '';
+    if (angleDeg > -22.5 && angleDeg <= 22.5) {
+      direction = 'North';
+    } else if (angleDeg > 22.5 && angleDeg <= 67.5) {
+      direction = 'Northeast';
+    } else if (angleDeg > 67.5 && angleDeg <= 112.5) {
+      direction = 'East';
+    } else if (angleDeg > 112.5 && angleDeg <= 157.5) {
+      direction = 'Southeast';
+    } else if (angleDeg > 157.5 || angleDeg <= -157.5) {
+      direction = 'South';
+    } else if (angleDeg > -157.5 && angleDeg <= -112.5) {
+      direction = 'Southwest';
+    } else if (angleDeg > -112.5 && angleDeg <= -67.5) {
+      direction = 'West';
+    } else if (angleDeg > -67.5 && angleDeg <= -22.5) {
+      direction = 'Northwest';
+    }
+
+    const glow = document.getElementById('beaconGlow');
+    glow.style.display = 'block';
+
+    let style = '';
+    let labelStyle = '';
+    switch (direction) {
+      case 'North':
+        style = `
+          left: 0; top: 0; width: 100vw; height: 80px;
+          background: radial-gradient(ellipse at 50% 0%, rgba(255,255,180,0.85) 0%, rgba(255,255,180,0.35) 80%, transparent 100%);
+          `;
+        labelStyle = 'top: 16px; left: 50%; transform: translateX(-50%); text-align: center;';
+        break;
+      case 'Northeast':
+        style = `
+          right: 0; top: 0; width: 120px; height: 120px;
+          background: radial-gradient(ellipse at 100% 0%, rgba(255,255,180,0.85) 0%, rgba(255,255,180,0.35) 80%, transparent 100%);
+          `;
+        labelStyle = 'top: 16px; right: 16px; text-align: right;';
+        break;
+      case 'East':
+        style = `
+          right: 0; top: 0; width: 80px; height: 100vh;
+          background: radial-gradient(ellipse at 100% 50%, rgba(255,255,180,0.85) 0%, rgba(255,255,180,0.35) 80%, transparent 100%);
+          `;
+        labelStyle = 'top: 50%; right: 16px; transform: translateY(-50%); text-align: right;';
+        break;
+      case 'Southeast':
+        style = `
+          right: 0; bottom: 0; width: 120px; height: 120px;
+          background: radial-gradient(ellipse at 100% 100%, rgba(255,255,180,0.85) 0%, rgba(255,255,180,0.35) 80%, transparent 100%);
+          `;
+        labelStyle = 'bottom: 16px; right: 16px; text-align: right;';
+        break;
+      case 'South':
+        style = `
+          left: 0; bottom: 0; width: 100vw; height: 80px;
+          background: radial-gradient(ellipse at 50% 100%, rgba(255,255,180,0.85) 0%, rgba(255,255,180,0.35) 80%, transparent 100%);
+          `;
+        labelStyle = 'bottom: 16px; left: 50%; transform: translateX(-50%); text-align: center;';
+        break;
+      case 'Southwest':
+        style = `
+          left: 0; bottom: 0; width: 120px; height: 120px;
+          background: radial-gradient(ellipse at 0% 100%, rgba(255,255,180,0.85) 0%, rgba(255,255,180,0.35) 80%, transparent 100%);
+          `;
+        labelStyle = 'bottom: 16px; left: 16px; text-align: left;';
+        break;
+      case 'West':
+        style = `
+          left: 0; top: 0; width: 80px; height: 100vh;
+          background: radial-gradient(ellipse at 0% 50%, rgba(255,255,180,0.85) 0%, rgba(255,255,180,0.35) 80%, transparent 100%);
+          `;
+        labelStyle = 'top: 50%; left: 16px; transform: translateY(-50%); text-align: left;';
+        break;
+      case 'Northwest':
+        style = `
+          left: 0; top: 0; width: 120px; height: 120px;
+          background: radial-gradient(ellipse at 0% 0%, rgba(255,255,180,0.85) 0%, rgba(255,255,180,0.35) 80%, transparent 100%);
+          `;
+        labelStyle = 'top: 16px; left: 16px; text-align: left;';
+        break;
+    }
+    glow.style.cssText = `
+      position: fixed;
+      pointer-events: none;
+      z-index: 99999;
+      display: block;
+      transition: opacity 0.3s;
+      opacity: ${Date.now() - beaconTimer < 800 ? 1 : 0.5};
+      top: auto;
+      left: auto;
+      right: auto;
+      bottom: auto;
+      width: auto;
+      height: auto;
+      ${style}
+    `;
+
+    glow.innerHTML = '';
+    const label = document.createElement('div');
+    label.textContent = 'this way';
+    label.style.cssText = `
+      position: absolute;
+      font-weight: bold;
+      font-size: 1.2em;
+      color: #bfa800;
+      text-shadow: 0 2px 8px #fff, 0 0 2px #fff;
+      ${labelStyle}
+    `;
+    glow.appendChild(label);
+
+    if (Date.now() - beaconTimer > 5000) {
+      beaconTimer = Date.now();
+    }
+}
+
+// Call this every frame, e.g. at the end of updateCarPosition:
+updateBeacon(
+  playerMarker.getLatLng().lat,
+  playerMarker.getLatLng().lng,
+  destCity.geometry.coordinates[1],
+  destCity.geometry.coordinates[0]
+);
 })();

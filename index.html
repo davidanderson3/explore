@@ -10,7 +10,66 @@
 <body>
   <canvas id="mapSampler" style="display:none;"></canvas>
   <div id="map"></div>
-  <div id="infoPanel"></div>
+
+  <!-- Mission message at the very top -->
+  <div id="missionMessage" style="
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    background: #222;
+    color: #fff;
+    font-size: 1.2em;
+    padding: 10px 0 8px 0;
+    text-align: center;
+    z-index: 10010;
+    font-family: sans-serif;
+    pointer-events: none;
+  "></div>
+
+  <!-- Health bar below the mission message -->
+  <div id="playerHealthBar" style="
+    position: fixed;
+    top: 44px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 220px;
+    height: 24px;
+    background: #222;
+    border: 2px solid #800000;
+    border-radius: 8px;
+    z-index: 10009;
+    box-shadow: 0 2px 8px #0008;
+    pointer-events: none;
+  ">
+    <div id="playerHealthFill" style="
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, #e53935, #ffb300);
+      border-radius: 6px;
+      transition: width 0.2s;
+    "></div>
+  </div>
+
+  <!-- Info panel in the left, full height, no background -->
+  <div id="infoPanel" style="
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 320px;
+    max-width: 90vw;
+    max-height: 100vh;
+    overflow-y: auto;
+    background: rgba(255,255,255,0.92); /* Translucent white */
+    color: #222;
+    border-radius: 0;
+    box-shadow: 0 2px 12px #0002;
+    padding: 48px 18px 24px 18px;
+    z-index: 10011;
+    font-size: 1em;
+    display: none;
+  "></div>
 
   <div id="instructions">
     <span id="desktopInstructions">Use arrow keys to drive.</span>
@@ -20,6 +79,31 @@
     <button id="myLocation">Explore My Location</button>
     <button id="randomLocation">Explore Random Location</button>
   </div>
+
+  <div id="beaconArrow" style="
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    width: 60px;
+    height: 60px;
+    margin-left: -30px;
+    margin-top: -180px; /* Start above center */
+    z-index: 10020;
+    pointer-events: none;
+    display: none;
+    transition: opacity 0.2s;
+  ">
+    <svg width="60" height="60">
+      <polygon id="beaconArrowShape" points="30,0 50,50 30,40 10,50" fill="#ffeb3b" stroke="#bfa800" stroke-width="3"/>
+    </svg>
+  </div>
+
+  <div id="beaconGlow" style="
+    position: fixed;
+    pointer-events: none;
+    z-index: 10020;
+    display: none;
+"></div>
 
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
