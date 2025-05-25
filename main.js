@@ -26,7 +26,7 @@
     minZoom: 12,
     maxZoom: 14,
     preferCanvas: true,
-    keepBuffer: 16
+    keepBuffer: 64
   });
 
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -54,13 +54,13 @@
 
 document.addEventListener('keydown', (e) => {
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
-    e.preventDefault(); // ✅ stop arrow keys and spacebar from scrolling the page
+    e.preventDefault();
   }
 
   keysPressed[e.key] = true;
 
   if (e.key === 'ArrowUp' || e.key === 'ArrowDown') accelerating = true;
-  if (e.code === 'Space') fireProjectile();
+  if (e.code === 'Space') fireProjectileSpray(); // <--- use spray
 });
 
 document.addEventListener('keyup', (e) => {
@@ -118,6 +118,179 @@ document.addEventListener('keyup', (e) => {
     };
 
     projectiles.push(projectile);
+  }
+
+  function fireProjectileSpray() {
+    const { lat, lng } = playerMarker.getLatLng();
+    const baseHeading = carHeading;
+    const sprayCount = 5; // Number of projectiles in the spray
+    const spraySpread = 30; // Total degrees of spread
+    const speed = 0.004; // Slower, more graceful
+
+    for (let i = 0; i < sprayCount; i++) {
+      const angle = baseHeading - spraySpread / 2 + (spraySpread / (sprayCount - 1)) * i;
+      const headingRad = angle * Math.PI / 180;
+
+      const projectile = {
+        lat,
+        lng,
+        dx: speed * Math.sin(headingRad), // longitude (X)
+        dy: speed * Math.cos(headingRad), // latitude (Y)
+        marker: L.circleMarker([lat, lng], {
+          radius: 4,
+          color: 'red',
+          fillColor: 'red',
+          fillOpacity: 0.9,
+          weight: 1
+        }).addTo(map),
+        lifetime: 100
+      };
+
+      projectiles.push(projectile);
+    }
+  }
+
+  setInterval(() => {
+    if (!accelerating) carSpeed += (0 - carSpeed) * 0.1;
+  }, 50);
+
+  async function fetchWikipediaContent(lat, lon) {
+    console.log(`🔎 Fetching from Wikipedia near (${lat.toFixed(5)}, ${lon.toFixed(5)})`);
+    try {
+      const geoUrl = `https://en.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${lat}|${lon}&gsradius=3000&gslimit=1&format=json&origin=*`;
+      const geoResp = await fetch(geoUrl);
+      const geoData = await geoResp.json();
+      const pages = geoData.query.geosearch;
+
+      if (!pages.length) {
+        console.log("⚠️ No nearby Wikipedia results.");
+        document.getElementById("infoPanel").style.display = "none";
+        return;
+      }
+
+      const page = pages[0];
+      const title = page.title;
+      const urlTitle = encodeURIComponent(title.replace(/ /g, "_"));
+
+      L.marker([page.lat, page.lon], {
+        title: title
+      }).addTo(map).bindPopup(
+        `<strong>${title}</strong><br><a href="https://en.wikipedia.org/wiki/${urlTitle}" target="_blank">Open on Wikipedia</a>`
+      );
+
+      const extractUrl = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&titles=${urlTitle}&format=json&origin=*`;
+      const extractResp = await fetch(extractUrl);
+      const extractData = await extractResp.json();
+      const pageId = Object.keys(extractData.query.pages)[0];
+      const extract = extractData.query.pages[pageId].extract;
+
+      let imgHtml = "";
+      try {
+        const imgResp = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${urlTitle}&prop=pageimages&format=json&pithumbsize=300&origin=*`);
+        const imgData = await imgResp.json();
+        const imgPageId = Object.keys(imgData.query.pages)[0];
+        const img = imgData.query.pages[imgPageId].thumbnail?.source;
+        if (img) imgHtml = `<img src="${img}" style="max-width:100%; margin-bottom:10px;">`;
+      } catch {}
+
+      const infoPanel = document.getElementById("infoPanel");
+      infoPanel.innerHTML = `
+        <h3>${title}</h3>
+        ${imgHtml}
+        <p>${extract}</p>
+        <a href="https://en.wikipedia.org/wiki/${urlTitle}" target="_blank">Read more on Wikipedia</a>
+      `;
+      infoPanel.style.display = "block";
+
+    } catch (err) {
+      console.error("🚨 Wikipedia fetch error:", err);
+      document.getElementById("infoPanel").style.display = "none";
+    }
+  }
+
+  let enemy = null;
+  let enemyMarker = null;
+  let enemyHealthBar = null;
+  let enemyMoveAngle = 0;
+  let enemyMoveRadius = 0.008;
+  let enemyMoveSpeed = 0.015;
+
+  // Spawn the UFO near the player
+  function spawnEnemy() {
+    const playerPos = playerMarker.getLatLng();
+    const centerLat = playerPos.lat + (Math.random() - 0.5) * 0.01;
+    const centerLng = playerPos.lng + (Math.random() - 0.5) * 0.01;
+
+    enemy = {
+      centerLat,
+      centerLng,
+      lat: centerLat,
+      lng: centerLng,
+      health: 10,
+      maxHealth: 10
+    };
+    enemyMoveAngle = Math.random() * Math.PI * 2;
+
+    if (enemyMarker) map.removeLayer(enemyMarker);
+    if (enemyHealthBar) map.removeLayer(enemyHealthBar);
+
+    enemyMarker = L.marker([enemy.lat, enemy.lng], {
+      icon: L.divIcon({
+        html: `<img src="assets/ufo.png" style="width:80px;height:80px;">`,
+        iconSize: [80, 80],
+        className: ''
+      })
+    }).addTo(map);
+
+    enemyHealthBar = L.rectangle([
+      [enemy.lat + 0.004, enemy.lng - 0.002],      // Move further north (+0.004)
+      [enemy.lat + 0.0044, enemy.lng + 0.002]      // Move further north (+0.0044)
+    ], {
+      color: "#800000",        // Dark red border
+      weight: 2,
+      fillColor: "#800000",    // Dark red fill
+      fillOpacity: 0.85
+    }).addTo(map);
+  }
+
+  // UFO movement logic
+  function moveEnemyUFO() {
+    if (!enemy) return;
+    enemyMoveAngle += enemyMoveSpeed;
+    enemy.lat = enemy.centerLat + enemyMoveRadius * Math.cos(enemyMoveAngle);
+    enemy.lng = enemy.centerLng + enemyMoveRadius * Math.sin(enemyMoveAngle);
+    if (enemyMarker) enemyMarker.setLatLng([enemy.lat, enemy.lng]);
+    if (enemyHealthBar) {
+      const healthRatio = enemy.health / enemy.maxHealth;
+      const barLng1 = enemy.lng - 0.002;
+      const barLng2 = enemy.lng - 0.002 + 0.004 * healthRatio;
+      enemyHealthBar.setBounds([
+        [enemy.lat + 0.004, barLng1],      // Match the new offset
+        [enemy.lat + 0.0044, barLng2]
+      ]);
+      enemyHealthBar.bringToFront();
+    }
+  }
+
+  // Collision detection and respawn logic
+  function handleEnemyHitAndRespawn() {
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      const p = projectiles[i];
+      if (
+        enemy &&
+        Math.hypot(p.lat - enemy.lat, p.lng - enemy.lng) < 0.004
+      ) {
+        enemy.health--;
+        if (enemy.health <= 0) {
+          if (enemyMarker) map.removeLayer(enemyMarker);
+          if (enemyHealthBar) map.removeLayer(enemyHealthBar);
+          enemy = null;
+          setTimeout(spawnEnemy, 2000);
+        }
+        map.removeLayer(p.marker);
+        projectiles.splice(i, 1);
+      }
+    }
   }
 
   setInterval(() => {
@@ -256,14 +429,22 @@ if (currentIcon !== 'assets/car.png') {
         }
       }
 
+      moveEnemyUFO();
+      handleEnemyHitAndRespawn();
+
       requestAnimationFrame(updateCarPosition);
     } catch (e) {
       console.error("💥 updateCarPosition error:", e);
     }
   }
 
+  // --- INITIAL ENEMY SPAWN ---
+  spawnEnemy();
+
+  // Start the game loop
   updateCarPosition();
 
+  // Button handlers (keep these inside the IIFE)
   document.getElementById('myLocation').onclick = () => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(position => {
@@ -284,4 +465,7 @@ if (currentIcon !== 'assets/car.png') {
     GameState.player.lat = random.lat;
     GameState.player.lng = random.lng;
   };
+
+  // --- INITIAL ENEMY SPAWN ---
+  spawnEnemy();
 })();
