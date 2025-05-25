@@ -8,6 +8,29 @@
     return await response.json();
   }
 
+  function showInfoPanel() {
+    const panel = document.getElementById("infoPanel");
+    if (window.innerWidth <= 768) {
+      panel.classList.add("open");
+      panel.style.display = "block";
+    } else {
+      panel.style.display = "block";
+    }
+  }
+
+  function hideInfoPanel() {
+    const panel = document.getElementById("infoPanel");
+    if (window.innerWidth <= 768) {
+      panel.classList.remove("open");
+      setTimeout(() => {
+        panel.style.display = "none";
+      }, 300);
+    } else {
+      panel.style.display = "none";
+    }
+  }
+
+
   const cities = await loadGeoJSON('assets/cities.geojson');
 
   const cityFeatures = cities.features;
@@ -72,26 +95,26 @@
   let carHeading = 0, carSpeed = 0, accelerating = false, lastFetchTime = 0;
   let touchTarget = null;
 
-document.addEventListener('keydown', (e) => {
-  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
-    e.preventDefault();
-  }
+  document.addEventListener('keydown', (e) => {
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
+      e.preventDefault();
+    }
 
-  keysPressed[e.key] = true;
+    keysPressed[e.key] = true;
 
-  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') accelerating = true;
-  if (e.code === 'Space') fireProjectileSpray(); // <--- use spray
-});
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') accelerating = true;
+    if (e.code === 'Space') fireProjectileSpray(); // <--- use spray
+  });
 
-document.addEventListener('keyup', (e) => {
-  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
-    e.preventDefault();
-  }
+  document.addEventListener('keyup', (e) => {
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
+      e.preventDefault();
+    }
 
-  keysPressed[e.key] = false;
+    keysPressed[e.key] = false;
 
-  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') accelerating = false;
-});
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') accelerating = false;
+  });
 
 
   if (window.innerWidth <= 768) {
@@ -211,18 +234,19 @@ document.addEventListener('keyup', (e) => {
         const imgPageId = Object.keys(imgData.query.pages)[0];
         const img = imgData.query.pages[imgPageId].thumbnail?.source;
         if (img) imgHtml = `<img src="${img}" style="max-width:100%; margin-bottom:10px;">`;
-      } catch {}
+      } catch { }
 
-      const infoPanel = document.getElementById("infoPanel");
-      infoPanel.innerHTML = `
-        <div style="margin-top: 24px;">
-          <h3>${title}</h3>
-        </div>
-        ${imgHtml}
-        <p>${extract}</p>
-        <a href="https://en.wikipedia.org/wiki/${urlTitle}" target="_blank">Read more on Wikipedia</a>
-      `;
-      infoPanel.style.display = "block";
+      document.getElementById("infoContent").innerHTML = `
+  <div style="margin-top: 24px;">
+    <h3>${title}</h3>
+  </div>
+  ${imgHtml}
+  <p>${extract}</p>
+  <a href="https://en.wikipedia.org/wiki/${urlTitle}" target="_blank">Read more on Wikipedia</a>
+`;
+
+      showInfoPanel();
+
 
     } catch (err) {
       console.error("🚨 Wikipedia fetch error:", err);
@@ -379,7 +403,7 @@ document.addEventListener('keyup', (e) => {
         const imgPageId = Object.keys(imgData.query.pages)[0];
         const img = imgData.query.pages[imgPageId].thumbnail?.source;
         if (img) imgHtml = `<img src="${img}" style="max-width:100%; margin-bottom:10px;">`;
-      } catch {}
+      } catch { }
 
       const infoPanel = document.getElementById("infoPanel");
       infoPanel.innerHTML = `
@@ -432,14 +456,14 @@ document.addEventListener('keyup', (e) => {
       newLat = Math.max(-85, Math.min(85, newLat));
       newLng = ((newLng + 180) % 360 + 360) % 360 - 180;
 
-if (currentIcon !== 'assets/car.png') {
-  currentIcon = 'assets/car.png';
-  playerMarker.setIcon(L.divIcon({
-    html: `<img src="${currentIcon}" style="width:40px;height:40px;transform: rotate(${carHeading}deg); transform-origin: center center;">`,
-    iconSize: [40, 40],
-    className: ''
-  }));
-}
+      if (currentIcon !== 'assets/car.png') {
+        currentIcon = 'assets/car.png';
+        playerMarker.setIcon(L.divIcon({
+          html: `<img src="${currentIcon}" style="width:40px;height:40px;transform: rotate(${carHeading}deg); transform-origin: center center;">`,
+          iconSize: [40, 40],
+          className: ''
+        }));
+      }
 
       playerMarker.setLatLng([newLat, newLng]);
       const iconElement = playerMarker.getElement();
@@ -535,6 +559,14 @@ if (currentIcon !== 'assets/car.png') {
     } catch (e) {
       console.error("💥 updateCarPosition error:", e);
     }
+
+      // Call this every frame, e.g. at the end of updateCarPosition:
+updateBeacon(
+  playerMarker.getLatLng().lat,
+  playerMarker.getLatLng().lng,
+  destCity.geometry.coordinates[1],
+  destCity.geometry.coordinates[0]
+);
   }
 
   // --- INITIAL ENEMY SPAWN ---
@@ -543,27 +575,6 @@ if (currentIcon !== 'assets/car.png') {
   // Start the game loop
   updateCarPosition();
 
-  // Button handlers (keep these inside the IIFE)
-  document.getElementById('myLocation').onclick = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(position => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        playerMarker.setLatLng([lat, lng]);
-        map.setView([lat, lng], 18);
-        GameState.player.lat = lat;
-        GameState.player.lng = lng;
-      });
-    }
-  };
-
-  document.getElementById('randomLocation').onclick = () => {
-    const random = getRandomCityPoint(cities);
-    playerMarker.setLatLng([random.lat, random.lng]);
-    map.setView([random.lat, random.lng], 14);
-    GameState.player.lat = random.lat;
-    GameState.player.lng = random.lng;
-  };
 
   // --- INITIAL ENEMY SPAWN ---
   spawnEnemy();
@@ -612,133 +623,92 @@ if (currentIcon !== 'assets/car.png') {
   }
 
   let beaconAngle = 0;
-  let beaconTimer = 0;
+let beaconTimer = 0;
 
-  function updateBeacon(playerLat, playerLng, destLat, destLng) {
-    const angleRad = Math.atan2(destLng - playerLng, destLat - playerLat);
-    const angleDeg = angleRad * 180 / Math.PI;
+function updateBeacon(playerLat, playerLng, destLat, destLng) {
+  const now = Date.now();
+  if (now - beaconTimer < 4000) return;
 
-    let direction = '';
-    if (angleDeg > -22.5 && angleDeg <= 22.5) {
-      direction = 'North';
-    } else if (angleDeg > 22.5 && angleDeg <= 67.5) {
-      direction = 'Northeast';
-    } else if (angleDeg > 67.5 && angleDeg <= 112.5) {
-      direction = 'East';
-    } else if (angleDeg > 112.5 && angleDeg <= 157.5) {
-      direction = 'Southeast';
-    } else if (angleDeg > 157.5 || angleDeg <= -157.5) {
-      direction = 'South';
-    } else if (angleDeg > -157.5 && angleDeg <= -112.5) {
-      direction = 'Southwest';
-    } else if (angleDeg > -112.5 && angleDeg <= -67.5) {
-      direction = 'West';
-    } else if (angleDeg > -67.5 && angleDeg <= -22.5) {
-      direction = 'Northwest';
-    }
+  beaconTimer = now;
 
-    const glow = document.getElementById('beaconGlow');
-    glow.style.display = 'block';
+  const angleRad = Math.atan2(destLng - playerLng, destLat - playerLat);
+  const angleDeg = angleRad * 180 / Math.PI;
 
-    let style = '';
-    let labelStyle = '';
-    switch (direction) {
-      case 'North':
-        style = `
-          left: 0; top: 0; width: 100vw; height: 80px;
-          background: radial-gradient(ellipse at 50% 0%, rgba(255,255,180,0.85) 0%, rgba(255,255,180,0.35) 80%, transparent 100%);
-          `;
-        labelStyle = 'top: 16px; left: 50%; transform: translateX(-50%); text-align: center;';
-        break;
-      case 'Northeast':
-        style = `
-          right: 0; top: 0; width: 120px; height: 120px;
-          background: radial-gradient(ellipse at 100% 0%, rgba(255,255,180,0.85) 0%, rgba(255,255,180,0.35) 80%, transparent 100%);
-          `;
-        labelStyle = 'top: 16px; right: 16px; text-align: right;';
-        break;
-      case 'East':
-        style = `
-          right: 0; top: 0; width: 80px; height: 100vh;
-          background: radial-gradient(ellipse at 100% 50%, rgba(255,255,180,0.85) 0%, rgba(255,255,180,0.35) 80%, transparent 100%);
-          `;
-        labelStyle = 'top: 50%; right: 16px; transform: translateY(-50%); text-align: right;';
-        break;
-      case 'Southeast':
-        style = `
-          right: 0; bottom: 0; width: 120px; height: 120px;
-          background: radial-gradient(ellipse at 100% 100%, rgba(255,255,180,0.85) 0%, rgba(255,255,180,0.35) 80%, transparent 100%);
-          `;
-        labelStyle = 'bottom: 16px; right: 16px; text-align: right;';
-        break;
-      case 'South':
-        style = `
-          left: 0; bottom: 0; width: 100vw; height: 80px;
-          background: radial-gradient(ellipse at 50% 100%, rgba(255,255,180,0.85) 0%, rgba(255,255,180,0.35) 80%, transparent 100%);
-          `;
-        labelStyle = 'bottom: 16px; left: 50%; transform: translateX(-50%); text-align: center;';
-        break;
-      case 'Southwest':
-        style = `
-          left: 0; bottom: 0; width: 120px; height: 120px;
-          background: radial-gradient(ellipse at 0% 100%, rgba(255,255,180,0.85) 0%, rgba(255,255,180,0.35) 80%, transparent 100%);
-          `;
-        labelStyle = 'bottom: 16px; left: 16px; text-align: left;';
-        break;
-      case 'West':
-        style = `
-          left: 0; top: 0; width: 80px; height: 100vh;
-          background: radial-gradient(ellipse at 0% 50%, rgba(255,255,180,0.85) 0%, rgba(255,255,180,0.35) 80%, transparent 100%);
-          `;
-        labelStyle = 'top: 50%; left: 16px; transform: translateY(-50%); text-align: left;';
-        break;
-      case 'Northwest':
-        style = `
-          left: 0; top: 0; width: 120px; height: 120px;
-          background: radial-gradient(ellipse at 0% 0%, rgba(255,255,180,0.85) 0%, rgba(255,255,180,0.35) 80%, transparent 100%);
-          `;
-        labelStyle = 'top: 16px; left: 16px; text-align: left;';
-        break;
-    }
-    glow.style.cssText = `
-      position: fixed;
-      pointer-events: none;
-      z-index: 99999;
-      display: block;
-      transition: opacity 0.3s;
-      opacity: ${Date.now() - beaconTimer < 800 ? 1 : 0.5};
-      top: auto;
-      left: auto;
-      right: auto;
-      bottom: auto;
-      width: auto;
-      height: auto;
-      ${style}
-    `;
+  let direction = '';
+  if (angleDeg > -22.5 && angleDeg <= 22.5) direction = 'North';
+  else if (angleDeg > 22.5 && angleDeg <= 67.5) direction = 'Northeast';
+  else if (angleDeg > 67.5 && angleDeg <= 112.5) direction = 'East';
+  else if (angleDeg > 112.5 && angleDeg <= 157.5) direction = 'Southeast';
+  else if (angleDeg > 157.5 || angleDeg <= -157.5) direction = 'South';
+  else if (angleDeg > -157.5 && angleDeg <= -112.5) direction = 'Southwest';
+  else if (angleDeg > -112.5 && angleDeg <= -67.5) direction = 'West';
+  else if (angleDeg > -67.5 && angleDeg <= -22.5) direction = 'Northwest';
 
-    glow.innerHTML = '';
-    const label = document.createElement('div');
-    label.textContent = 'this way';
-    label.style.cssText = `
-      position: absolute;
-      font-weight: bold;
-      font-size: 1.2em;
-      color: #bfa800;
-      text-shadow: 0 2px 8px #fff, 0 0 2px #fff;
-      ${labelStyle}
-    `;
-    glow.appendChild(label);
+const glow = document.getElementById('beaconGlow');
 
-    if (Date.now() - beaconTimer > 5000) {
-      beaconTimer = Date.now();
-    }
+// Always clear any existing background and restart the fade
+glow.removeAttribute('style');
+glow.className = '';
+glow.style.position = 'absolute';
+glow.style.top = '0';
+glow.style.left = '0';
+glow.style.width = '100%';
+glow.style.height = '100%';
+glow.style.pointerEvents = 'none';
+glow.style.zIndex = '10010';
+glow.style.opacity = '0';  // reset before fade-in
+
+// Add background for current direction
+glow.style.background = directionBackground(direction);
+
+// Force reflow to trigger transition
+void glow.offsetWidth;
+
+// Fade in
+glow.style.opacity = '1';
+
+
+  setTimeout(() => {
+    glow.style.opacity = '0';
+    setTimeout(() => {
+      glow.style.display = 'none';
+    }, 500); // wait for fade-out
+  }, 2000); // display for 2s
 }
 
-// Call this every frame, e.g. at the end of updateCarPosition:
-updateBeacon(
-  playerMarker.getLatLng().lat,
-  playerMarker.getLatLng().lng,
-  destCity.geometry.coordinates[1],
-  destCity.geometry.coordinates[0]
-);
+
+function directionBackground(direction) {
+  const strong = 'rgba(78, 247, 83, 0.85)';  // brighter center
+  const soft = 'rgba(255,255,180,0.25)';    // dimmer outer edge
+  const spread = '20%'; // tighter glow (was 80%)
+
+  switch (direction) {
+    case 'North':
+      return `radial-gradient(ellipse at 50% 0%, ${strong} 0%, ${soft} ${spread}, transparent 100%)`;
+    case 'Northeast':
+      return `radial-gradient(ellipse at 100% 0%, ${strong} 0%, ${soft} ${spread}, transparent 100%)`;
+    case 'East':
+      return `radial-gradient(ellipse at 100% 50%, ${strong} 0%, ${soft} ${spread}, transparent 100%)`;
+    case 'Southeast':
+      return `radial-gradient(ellipse at 100% 100%, ${strong} 0%, ${soft} ${spread}, transparent 100%)`;
+    case 'South':
+      return `radial-gradient(ellipse at 50% 100%, ${strong} 0%, ${soft} ${spread}, transparent 100%)`;
+    case 'Southwest':
+      return `radial-gradient(ellipse at 0% 100%, ${strong} 0%, ${soft} ${spread}, transparent 100%)`;
+    case 'West':
+      return `radial-gradient(ellipse at 0% 50%, ${strong} 0%, ${soft} ${spread}, transparent 100%)`;
+    case 'Northwest':
+      return `radial-gradient(ellipse at 0% 0%, ${strong} 0%, ${soft} ${spread}, transparent 100%)`;
+    default:
+      return '';
+  }
+}
+
+
+
+
+
+console.log("glow updated");  // <-- add this
+  document.getElementById("closeInfoPanel").addEventListener("click", hideInfoPanel);
+
 })();

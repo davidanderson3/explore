@@ -1,72 +1,166 @@
-/* style.css */
-html, body, #map {
+html, body {
   height: 100%;
   margin: 0;
   padding: 0;
+  overflow: hidden;
+  font-family: sans-serif;
 }
 
-#infoPanel {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 320px;
-  max-height: 60%;
-  background: white;
-  overflow-y: auto;
-  padding: 12px;
-  box-shadow: -2px 0 5px rgba(0,0,0,0.3);
-  font-family: sans-serif;
-  display: none;
-  z-index: 9998;
-  margin-bottom: 80px; /* creates space above buttons */
+#mainLayout {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  gap: 0; /* Add this line */
 }
+
+
+#map {
+  flex: 0 0 70vw; /* fixed width: 70% of screen */
+  height: 100vh;
+  position: relative;
+  min-width: 0;
+}
+
+
+#infoPanel {
+  position: relative;
+  height: 100vh;
+  width: 30vw; /* match remaining space from 70vw map */
+  max-width: none; /* remove vw-based cap */
+  overflow-y: auto;
+  background: rgba(255,255,255,0.92);
+  color: #222;
+  box-shadow: 0 2px 12px #0002;
+  padding: 48px 18px 24px 18px;
+  font-size: 1em;
+  flex-shrink: 0;
+  transition: transform 0.3s ease, opacity 0.3s ease;
+  opacity: 1;
+  visibility: visible;
+  z-index: 10011;
+}
+
+
 
 @media (max-width: 768px) {
   #infoPanel {
     position: fixed;
-    top: auto;
-    bottom: 80px;
+    width: 100vw;
+    height: 40vh;
+    max-height: 40vh;
     left: 0;
     right: 0;
-    width: 100%;
-    max-height: 35vh;
-    padding: 12px;
-    font-size: 16px;
-    box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.3);
-    overflow-y: auto;
-    z-index: 9998;
-    background: white;
+    top: auto;
+    bottom: 0;
+    transform: translateY(100%);
+    z-index: 10011;
+  }
+
+  #infoPanel.open {
+    transform: translateY(0%);
   }
 }
 
-
-
-#infoPanel img {
+#infoContent img {
   max-width: 100%;
   height: auto;
   display: block;
   margin-bottom: 10px;
 }
 
-#infoPanel h3 {
+#infoContent h3 {
   margin-top: 0;
   font-size: 1.2em;
 }
 
-#infoPanel p {
+#infoContent p {
   line-height: 1.4;
   margin-bottom: 10px;
+}
+
+#closeInfoPanel {
+  display: none;
+}
+
+#beaconGlow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 10010;
+  opacity: 0;
+  transition: opacity 0.5s ease-in;
+}
+
+
+
+#beaconGlow {
+  background: rgba(255, 0, 0, 0.5); /* test red overlay */
+}
+
+@keyframes beaconPulse {
+  0%   { opacity: 0; }
+  10%  { opacity: 1; }
+  30%  { opacity: 0.5; }
+  60%  { opacity: 0.8; }
+  100% { opacity: 0; }
+}
+
+#beaconGlow.pulsing {
+  animation: beaconPulse 1.5s ease-out;
+}
+
+
+#playerHealthBar {
+  position: absolute;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 220px;
+  height: 22px;
+  background: #222;
+  border: 2px solid #800000;
+  border-radius: 8px;
+  z-index: 1002;
+  box-shadow: 0 2px 8px #0008;
+  pointer-events: none;
+  display: block;
+  overflow: hidden;
+}
+
+#playerHealthFill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #43e97b, #38f9d7);
+  border-radius: 6px;
+  transition: width 0.2s;
+}
+
+#missionMessage {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #222;
+  color: #fff;
+  font-size: 1.2em;
+  padding: 10px 20px;
+  text-align: center;
+  z-index: 10020; /* higher than infoPanel */
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 
 #instructions {
   position: fixed;
-  top: 10px;
-  left: 50%;
-  transform: translateX(-50%);
+  bottom: 10px;
+  left: 10px;
   background: rgba(255, 255, 255, 0.8);
   padding: 10px 16px;
-  font-family: sans-serif;
   z-index: 1002;
   max-width: 90%;
   border-radius: 6px;
@@ -75,27 +169,36 @@ html, body, #map {
 }
 
 @media (max-width: 768px) {
+  #mainLayout {
+    flex-direction: column;
+  }
+
+  #map {
+    height: 60vh;
+    max-width: 100vw;
+    order: 1;
+  }
+
   #instructions {
     display: none;
   }
 }
 
-  .leaflet-control-zoom {
-    display: none !important;
-  }
 #exploreButtons {
   position: fixed;
   bottom: 10px;
   right: 10px;
   background: rgba(255,255,255,0.95);
   padding: 10px;
-  font-family: sans-serif;
-  z-index: 9999; /* was 1001 */
+  z-index: 9999;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
+.leaflet-control-zoom {
+  display: none !important;
+}
 
 .leaflet-tile {
   transition: none !important;
