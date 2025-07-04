@@ -2,6 +2,9 @@
   const keysPressed = {};
   const projectiles = [];
   const enemyProjectiles = [];
+  let currentLevel = 1;
+  let playerMarker;
+
 
   async function loadGeoJSON(url) {
     const response = await fetch(url);
@@ -50,12 +53,6 @@
       minDist = dist;
       destCity = c;
     }
-  }
-
-  // Show the message
-  document.getElementById('missionMessage').textContent =
-    `Mission starts in ${startCity.properties.NAME}. Your job is to get to ${destCity.properties.NAME}. Good luck!`;
-
   // Use startCity for your spawn point:
   const start = {
     lat: startCity.geometry.coordinates[1],
@@ -78,19 +75,46 @@
     crossOrigin: true
   }).addTo(map);
 
-  let currentIcon = 'assets/car.png';
-  const playerMarker = L.marker([GameState.player.lat, GameState.player.lng], {
-    icon: L.divIcon({
-      html: `<img src="${currentIcon}" style="width:40px;height:40px;transform: rotate(0deg); transform-origin: center center;">`,
-      iconSize: [40, 40],
-      className: ''
-    })
-  }).addTo(map);
-
-  map.setView(playerMarker.getLatLng(), 15, { animate: false });
 
   window.addEventListener('load', () => map.invalidateSize());
+  let currentIcon = "assets/car.png";
   window.addEventListener('orientationchange', () => setTimeout(() => map.invalidateSize(), 500));
+  function startLevel1() {
+    map.setView([20, 0], 2);
+    document.getElementById("missionMessage").textContent = "Level 1: Click on France";
+    function checkCountry(e) {
+      const {lat, lng} = e.latlng;
+      if (lat >= 41 && lat <= 51 && lng >= -5 && lng <= 9) {
+        map.off("click", checkCountry);
+        startLevel2();
+      } else {
+        alert("Not France. Try again!");
+      }
+    }
+    map.on("click", checkCountry);
+  }
+
+  function startLevel2() {
+    currentLevel = 2;
+    playerMarker = L.marker([GameState.player.lat, GameState.player.lng], {
+      icon: L.divIcon({
+        html: `<img src="${currentIcon}" style="width:40px;height:40px;transform: rotate(0deg); transform-origin: center center;">`,
+        iconSize: [40, 40],
+        className: ""
+      })
+    }).addTo(map);
+    map.setView(playerMarker.getLatLng(), 15, { animate: false });
+    document.getElementById("missionMessage").textContent =
+      `Mission starts in ${startCity.properties.NAME}. Your job is to get to ${destCity.properties.NAME}. Good luck!`;
+    updatePlayerHealthBar();
+    updateCarPosition();
+  }
+
+  function startLevel3() {
+    currentLevel = 3;
+    document.getElementById("missionMessage").textContent = "Level 3: You made it!";
+  }
+
 
   let carHeading = 0, carSpeed = 0, accelerating = false, lastFetchTime = 0;
   let touchTarget = null;
@@ -529,31 +553,35 @@
       if (enemy && Math.random() < 0.016) {
         enemyShootProjectile();
       }
+// 
+//       moveEnemyUFO();
+//       handleEnemyHitAndRespawn();
 
-      moveEnemyUFO();
-      handleEnemyHitAndRespawn();
-
-      if (enemy) {
-        const playerPos = playerMarker.getLatLng();
-        const distToUFO = Math.hypot(playerPos.lat - enemy.lat, playerPos.lng - enemy.lng);
-        if (distToUFO < 0.0025) { // Much closer, nearly touching
-          playerHealth -= 1;
-          updatePlayerHealthBar();
-          // Optional: bounce the car back a bit
-          const angleAway = Math.atan2(playerPos.lat - enemy.lat, playerPos.lng - enemy.lng);
-          const bounceDist = 0.003;
-          playerMarker.setLatLng([
-            playerPos.lat + Math.sin(angleAway) * bounceDist,
-            playerPos.lng + Math.cos(angleAway) * bounceDist
-          ]);
-          map.setView(playerMarker.getLatLng());
-          if (playerHealth <= 0) {
-            alert("Game Over! You crashed into the UFO!");
-            playerHealth = playerMaxHealth;
-            updatePlayerHealthBar();
-          }
-        }
+//       if (enemy) {
+//         const playerPos = playerMarker.getLatLng();
+//         const distToUFO = Math.hypot(playerPos.lat - enemy.lat, playerPos.lng - enemy.lng);
+//         if (distToUFO < 0.0025) { // Much closer, nearly touching
+//           playerHealth -= 1;
+//           updatePlayerHealthBar();
+//           // Optional: bounce the car back a bit
+//           const angleAway = Math.atan2(playerPos.lat - enemy.lat, playerPos.lng - enemy.lng);
+//           const bounceDist = 0.003;
+//           playerMarker.setLatLng([
+//             playerPos.lat + Math.sin(angleAway) * bounceDist,
+//             playerPos.lng + Math.cos(angleAway) * bounceDist
+//           ]);
+//           map.setView(playerMarker.getLatLng());
+//           if (playerHealth <= 0) {
+//             alert("Game Over! You crashed into the UFO!");
+//             playerHealth = playerMaxHealth;
+//             updatePlayerHealthBar();
+//           }
+//         }
+      const distToDest = Math.hypot(newLat - destCity.geometry.coordinates[1], newLng - destCity.geometry.coordinates[0]);
+      if (currentLevel === 2 && distToDest < 0.01) {
+        startLevel3();
       }
+//       }
 
       requestAnimationFrame(updateCarPosition);
     } catch (e) {
@@ -570,19 +598,19 @@ updateBeacon(
   }
 
   // --- INITIAL ENEMY SPAWN ---
-  spawnEnemy();
+//   spawnEnemy();
 
   // Start the game loop
-  updateCarPosition();
+//   updateCarPosition();
 
 
   // --- INITIAL ENEMY SPAWN ---
-  spawnEnemy();
+//   spawnEnemy();
 
   // Enemy randomly shoots (about once every 60 frames)
-  if (enemy && Math.random() < 0.016) {
-    enemyShootProjectile();
-  }
+//   if (enemy && Math.random() < 0.016) {
+//     enemyShootProjectile();
+//   }
 
   function enemyShootProjectile() {
     if (!enemy) return;
@@ -710,5 +738,6 @@ function directionBackground(direction) {
 
 console.log("glow updated");  // <-- add this
   document.getElementById("closeInfoPanel").addEventListener("click", hideInfoPanel);
+  startLevel1();
 
 })();
