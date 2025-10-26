@@ -29,6 +29,7 @@ html, body {
   width: 30vw; /* match remaining space from 70vw map */
   max-width: none; /* remove vw-based cap */
   overflow-y: auto;
+  overflow-x: hidden;
   background: rgba(255,255,255,0.92);
   color: #222;
   box-shadow: 0 2px 12px #0002;
@@ -39,6 +40,8 @@ html, body {
   opacity: 1;
   visibility: visible;
   z-index: 10011;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 
@@ -77,6 +80,8 @@ html, body {
 #infoContent p {
   line-height: 1.4;
   margin-bottom: 10px;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 #closeInfoPanel {
