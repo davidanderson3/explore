@@ -2,7 +2,10 @@
   const keysPressed = {};
   const projectiles = [];
   const enemyProjectiles = [];
+  const enemies = [];
   let spawnPoint = null;
+  let routeStart = null;
+  let routeDestination = null;
 
   async function loadGeoJSON(url) {
     const response = await fetch(url);
@@ -43,8 +46,18 @@
   const COUNTDOWN_DIGIT_MS = 250;
   const COUNTDOWN_GO_MS = 400;
   const OVERLAY_FADE_MS = 300;
+  const MAP_FORWARD_OFFSET = 0.012;
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const clampLatitude = (value) => Math.max(-85, Math.min(85, value));
+  const normalizeLongitude = (value) => ((value + 180) % 360 + 360) % 360 - 180;
+
+  function computeAheadCenter(lat, lng, headingRad) {
+    const aheadLat = clampLatitude(lat + Math.cos(headingRad) * MAP_FORWARD_OFFSET);
+    const aheadLng = normalizeLongitude(lng + Math.sin(headingRad) * MAP_FORWARD_OFFSET);
+    return [aheadLat, aheadLng];
+  }
 
   function prepareOverlay({ message, showButton }) {
     const { container, button, countdown, message: messageEl } = overlayElements;
@@ -191,8 +204,14 @@
     lat: startCity.geometry.coordinates[1],
     lng: startCity.geometry.coordinates[0]
   };
+  const destinationPoint = {
+    lat: destCity.geometry.coordinates[1],
+    lng: destCity.geometry.coordinates[0]
+  };
   const GameState = { player: { lat: start.lat, lng: start.lng } };
   spawnPoint = { lat: start.lat, lng: start.lng };
+  routeStart = { ...start };
+  routeDestination = { ...destinationPoint };
 
   const map = L.map('map', {
     zoomControl: false,
@@ -218,13 +237,22 @@
     })
   }).addTo(map);
 
-  map.setView(playerMarker.getLatLng(), 15, { animate: false });
-
   window.addEventListener('load', () => map.invalidateSize());
   window.addEventListener('orientationchange', () => setTimeout(() => map.invalidateSize(), 500));
 
   let carHeading = 0, carSpeed = 0, accelerating = false, lastFetchTime = 0;
   let touchTarget = null;
+
+  ensureAheadView({ immediate: true });
+
+  function ensureAheadView({ immediate = false } = {}) {
+    const { lat, lng } = playerMarker.getLatLng();
+    const headingRad = carHeading * Math.PI / 180;
+    const [targetLat, targetLng] = computeAheadCenter(lat, lng, headingRad);
+
+    const viewZoom = map.getZoom() ?? 15;
+    map.setView([targetLat, targetLng], viewZoom, { animate: false });
+  }
 
   document.addEventListener('keydown', (e) => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
@@ -385,35 +413,50 @@
     }
   }
 
-  let enemy = null;
-  let enemyMarker = null;
-  let enemyHealthBar = null;
-  let enemyMoveAngle = 0;
-  let enemyMoveRadius = 0.008;
-  let enemyMoveSpeed = 0.015;
-  let enemyVelLat = 0;
-  let enemyVelLng = 0;
+  const ENEMY_BASE_COUNT = 5;
+  const ENEMY_RESPAWN_DELAY = 4500;
+  const ENEMY_JITTER = 0.01;
+  const ENEMY_ACCEL_VARIANCE = 0.00004;
+  const ENEMY_MAX_VELOCITY = 0.0004;
+  const ENEMY_MAX_DISTANCE = 0.018;
 
-  // Spawn the UFO near the player
-  function spawnEnemy() {
-    const playerPos = playerMarker.getLatLng();
-    const centerLat = playerPos.lat + (Math.random() - 0.5) * 0.03;
-    const centerLng = playerPos.lng + (Math.random() - 0.5) * 0.03;
+  function updateEnemyHealthVisual(enemy) {
+    if (!enemy.healthBar) return;
+    const healthRatio = Math.max(enemy.health, 0) / enemy.maxHealth;
+    const barLng1 = enemy.lng - 0.002;
+    const barLng2 = enemy.lng - 0.002 + 0.004 * healthRatio;
+    enemy.healthBar.setBounds([
+      [enemy.lat + 0.004, barLng1],
+      [enemy.lat + 0.0044, barLng2]
+    ]);
+    enemy.healthBar.bringToFront();
+  }
 
-    enemy = {
-      centerLat,
-      centerLng,
-      lat: centerLat,
-      lng: centerLng,
+  function removeEnemy(enemy) {
+    if (enemy.marker) map.removeLayer(enemy.marker);
+    if (enemy.healthBar) map.removeLayer(enemy.healthBar);
+    const idx = enemies.indexOf(enemy);
+    if (idx !== -1) enemies.splice(idx, 1);
+  }
+
+  function spawnEnemyAt(lat, lng) {
+    const clampedLat = clampLatitude(lat);
+    const normalizedLng = normalizeLongitude(lng);
+
+    const enemy = {
+      centerLat: clampedLat,
+      centerLng: normalizedLng,
+      lat: clampedLat,
+      lng: normalizedLng,
       health: 10,
-      maxHealth: 10
+      maxHealth: 10,
+      velLat: 0,
+      velLng: 0,
+      marker: null,
+      healthBar: null
     };
-    enemyMoveAngle = Math.random() * Math.PI * 2;
 
-    if (enemyMarker) map.removeLayer(enemyMarker);
-    if (enemyHealthBar) map.removeLayer(enemyHealthBar);
-
-    enemyMarker = L.marker([enemy.lat, enemy.lng], {
+    enemy.marker = L.marker([enemy.lat, enemy.lng], {
       icon: L.divIcon({
         html: `<img src="assets/ufo.png" style="width:80px;height:80px;">`,
         iconSize: [80, 80],
@@ -421,76 +464,134 @@
       })
     }).addTo(map);
 
-    enemyHealthBar = L.rectangle([
-      [enemy.lat + 0.004, enemy.lng - 0.002],      // Move further north (+0.004)
-      [enemy.lat + 0.0044, enemy.lng + 0.002]      // Move further north (+0.0044)
+    enemy.healthBar = L.rectangle([
+      [enemy.lat + 0.004, enemy.lng - 0.002],
+      [enemy.lat + 0.0044, enemy.lng + 0.002]
     ], {
-      color: "#800000",        // Dark red border
+      color: "#800000",
       weight: 2,
-      fillColor: "#800000",    // Dark red fill
+      fillColor: "#800000",
       fillOpacity: 0.85
     }).addTo(map);
+
+    updateEnemyHealthVisual(enemy);
+    enemies.push(enemy);
+    return enemy;
   }
 
-  // UFO movement logic
-  function moveEnemyUFO() {
-    if (!enemy) return;
+  function interpolateRoutePoint(t) {
+    if (!routeStart || !routeDestination) return { lat: GameState.player.lat, lng: GameState.player.lng };
+    const baseLat = routeStart.lat + (routeDestination.lat - routeStart.lat) * t;
+    const baseLng = routeStart.lng + (routeDestination.lng - routeStart.lng) * t;
+    return {
+      lat: baseLat,
+      lng: baseLng
+    };
+  }
 
-    // Make UFO less erratic and slower
-    enemyVelLat += (Math.random() - 0.5) * 0.00004; // was 0.00008
-    enemyVelLng += (Math.random() - 0.5) * 0.00004; // was 0.00008
-
-    // Lower max velocity for slower UFO
-    const maxVel = 0.0004; // was 0.0007
-    enemyVelLat = Math.max(-maxVel, Math.min(maxVel, enemyVelLat));
-    enemyVelLng = Math.max(-maxVel, Math.min(maxVel, enemyVelLng));
-
-    // Move the UFO
-    enemy.lat += enemyVelLat;
-    enemy.lng += enemyVelLng;
-
-    // Optionally, keep the UFO within a certain distance of its center
-    const dLat = enemy.lat - enemy.centerLat;
-    const dLng = enemy.lng - enemy.centerLng;
-    const maxDist = 0.018;
-    if (Math.hypot(dLat, dLng) > maxDist) {
-      // Steer back toward center
-      enemyVelLat -= dLat * 0.01;
-      enemyVelLng -= dLng * 0.01;
-    }
-
-    if (enemyMarker) enemyMarker.setLatLng([enemy.lat, enemy.lng]);
-    if (enemyHealthBar) {
-      const healthRatio = enemy.health / enemy.maxHealth;
-      const barLng1 = enemy.lng - 0.002;
-      const barLng2 = enemy.lng - 0.002 + 0.004 * healthRatio;
-      enemyHealthBar.setBounds([
-        [enemy.lat + 0.004, barLng1],
-        [enemy.lat + 0.0044, barLng2]
-      ]);
-      enemyHealthBar.bringToFront();
+  function spawnEnemiesAlongRoute(count = ENEMY_BASE_COUNT) {
+    if (!routeStart || !routeDestination) return;
+    const needed = Math.max(0, count - enemies.length);
+    for (let i = 0; i < needed; i++) {
+      const t = (i + 1) / (count + 1);
+      const basePoint = interpolateRoutePoint(t);
+      const jitterLat = (Math.random() - 0.5) * ENEMY_JITTER;
+      const jitterLng = (Math.random() - 0.5) * ENEMY_JITTER;
+      spawnEnemyAt(basePoint.lat + jitterLat, basePoint.lng + jitterLng);
     }
   }
 
-  // Collision detection and respawn logic
-  function handleEnemyHitAndRespawn() {
-    for (let i = projectiles.length - 1; i >= 0; i--) {
-      const p = projectiles[i];
-      if (
-        enemy &&
-        Math.hypot(p.lat - enemy.lat, p.lng - enemy.lng) < 0.004
-      ) {
-        enemy.health--;
-        if (enemy.health <= 0) {
-          if (enemyMarker) map.removeLayer(enemyMarker);
-          if (enemyHealthBar) map.removeLayer(enemyHealthBar);
-          enemy = null;
-          setTimeout(spawnEnemy, 2000);
-        }
-        map.removeLayer(p.marker);
-        projectiles.splice(i, 1);
+  function spawnEnemyAlongRouteLater(delay = ENEMY_RESPAWN_DELAY) {
+    if (!routeStart || !routeDestination) return;
+    setTimeout(() => {
+      const t = Math.random() * 0.8 + 0.1; // avoid spawning exactly at endpoints
+      const basePoint = interpolateRoutePoint(t);
+      const jitterLat = (Math.random() - 0.5) * ENEMY_JITTER;
+      const jitterLng = (Math.random() - 0.5) * ENEMY_JITTER;
+      spawnEnemyAt(basePoint.lat + jitterLat, basePoint.lng + jitterLng);
+    }, delay);
+  }
+
+  function moveEnemies() {
+    enemies.forEach((enemy) => {
+      enemy.velLat += (Math.random() - 0.5) * ENEMY_ACCEL_VARIANCE;
+      enemy.velLng += (Math.random() - 0.5) * ENEMY_ACCEL_VARIANCE;
+
+      enemy.velLat = Math.max(-ENEMY_MAX_VELOCITY, Math.min(ENEMY_MAX_VELOCITY, enemy.velLat));
+      enemy.velLng = Math.max(-ENEMY_MAX_VELOCITY, Math.min(ENEMY_MAX_VELOCITY, enemy.velLng));
+
+      enemy.lat = clampLatitude(enemy.lat + enemy.velLat);
+      enemy.lng = normalizeLongitude(enemy.lng + enemy.velLng);
+
+      const dLat = enemy.lat - enemy.centerLat;
+      const dLng = enemy.lng - enemy.centerLng;
+      if (Math.hypot(dLat, dLng) > ENEMY_MAX_DISTANCE) {
+        enemy.velLat -= dLat * 0.01;
+        enemy.velLng -= dLng * 0.01;
       }
+
+      if (enemy.marker) enemy.marker.setLatLng([enemy.lat, enemy.lng]);
+      updateEnemyHealthVisual(enemy);
+    });
+  }
+
+  function handleEnemyHitByProjectiles() {
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      const projectile = projectiles[i];
+      let hitEnemy = null;
+
+      for (let j = enemies.length - 1; j >= 0; j--) {
+        const enemy = enemies[j];
+        if (Math.hypot(projectile.lat - enemy.lat, projectile.lng - enemy.lng) < 0.004) {
+          hitEnemy = enemy;
+          break;
+        }
+      }
+
+      if (!hitEnemy) continue;
+
+      hitEnemy.health -= 1;
+      if (hitEnemy.health <= 0) {
+        removeEnemy(hitEnemy);
+        spawnEnemyAlongRouteLater();
+      } else {
+        updateEnemyHealthVisual(hitEnemy);
+      }
+
+      map.removeLayer(projectile.marker);
+      projectiles.splice(i, 1);
     }
+  }
+
+  function spawnEnemyProjectile(enemy) {
+    const angle = Math.random() * 360;
+    const headingRad = angle * Math.PI / 180;
+    const speed = 0.0003;
+
+    const projectile = {
+      lat: enemy.lat,
+      lng: enemy.lng,
+      dx: speed * Math.sin(headingRad),
+      dy: speed * Math.cos(headingRad),
+      marker: L.circleMarker([enemy.lat, enemy.lng], {
+        radius: 7,
+        color: 'purple',
+        fillColor: 'purple',
+        fillOpacity: 0.8,
+        weight: 2
+      }).addTo(map),
+      lifetime: 300
+    };
+
+    enemyProjectiles.push(projectile);
+  }
+
+  function enemiesShootProjectiles() {
+    enemies.forEach((enemy) => {
+      if (Math.random() < 0.016) {
+        spawnEnemyProjectile(enemy);
+      }
+    });
   }
 
   setInterval(() => {
@@ -616,10 +717,10 @@
     const respawnLng = (spawnPoint && spawnPoint.lng) || GameState.player.lng;
     const respawnLatLng = L.latLng(respawnLat, respawnLng);
     playerMarker.setLatLng(respawnLatLng);
-    map.setView(respawnLatLng, map.getZoom(), { animate: false });
     GameState.player.lat = respawnLat;
     GameState.player.lng = respawnLng;
     carHeading = 0;
+    ensureAheadView({ immediate: true });
 
     const remainingLives = playerLives;
     const message = remainingLives > 0
@@ -690,11 +791,6 @@
         }
       }
 
-      const center = map.getCenter();
-      if (Math.abs(center.lat - newLat) > 0.0025 || Math.abs(center.lng - newLng) > 0.0025) {
-        map.panTo([newLat, newLng], { animate: true });
-      }
-
       const now = Date.now();
       if (now - lastFetchTime > 3000) {
         lastFetchTime = now;
@@ -703,6 +799,7 @@
 
       GameState.player.lat = newLat;
       GameState.player.lng = newLng;
+      ensureAheadView();
 
       for (let i = projectiles.length - 1; i >= 0; i--) {
         const p = projectiles[i];
@@ -739,28 +836,27 @@
         }
       }
 
-      // Enemy randomly shoots (about once every 60 frames)
-      if (enemy && Math.random() < 0.016) {
-        enemyShootProjectile();
-      }
+      enemiesShootProjectiles();
+      moveEnemies();
+      handleEnemyHitByProjectiles();
 
-      moveEnemyUFO();
-      handleEnemyHitAndRespawn();
-
-      if (enemy) {
-        const playerPos = playerMarker.getLatLng();
+      const playerPos = playerMarker.getLatLng();
+      for (let i = 0; i < enemies.length; i++) {
+        const enemy = enemies[i];
         const distToUFO = Math.hypot(playerPos.lat - enemy.lat, playerPos.lng - enemy.lng);
-        if (distToUFO < 0.0025) { // Much closer, nearly touching
+        if (distToUFO < 0.0025) { // touching range
           playerHealth -= 1;
           updatePlayerHealthBar();
-          // Optional: bounce the car back a bit
           const angleAway = Math.atan2(playerPos.lat - enemy.lat, playerPos.lng - enemy.lng);
           const bounceDist = 0.003;
           playerMarker.setLatLng([
             playerPos.lat + Math.sin(angleAway) * bounceDist,
             playerPos.lng + Math.cos(angleAway) * bounceDist
           ]);
-          map.setView(playerMarker.getLatLng());
+          const bouncedPos = playerMarker.getLatLng();
+          GameState.player.lat = bouncedPos.lat;
+          GameState.player.lng = bouncedPos.lng;
+          ensureAheadView();
           if (playerHealth <= 0) {
             await handlePlayerDeath('UFO collision!');
             return;
@@ -773,55 +869,20 @@
       console.error("💥 updateCarPosition error:", e);
     }
 
-      // Call this every frame, e.g. at the end of updateCarPosition:
-updateBeacon(
-  playerMarker.getLatLng().lat,
-  playerMarker.getLatLng().lng,
-  destCity.geometry.coordinates[1],
-  destCity.geometry.coordinates[0]
-);
+    const beaconTarget = routeDestination || destinationPoint;
+    updateBeacon(
+      playerMarker.getLatLng().lat,
+      playerMarker.getLatLng().lng,
+      beaconTarget.lat,
+      beaconTarget.lng
+    );
   }
 
-  // --- INITIAL ENEMY SPAWN ---
-  spawnEnemy();
+  spawnEnemiesAlongRoute();
 
   // Start the game loop
   updateCarPosition();
 
-
-  // --- INITIAL ENEMY SPAWN ---
-  spawnEnemy();
-
-  // Enemy randomly shoots (about once every 60 frames)
-  if (enemy && Math.random() < 0.016) {
-    enemyShootProjectile();
-  }
-
-  function enemyShootProjectile() {
-    if (!enemy) return;
-    const angle = Math.random() * 360; // Random direction
-    const headingRad = angle * Math.PI / 180;
-    const speed = 0.0003; // Very slow
-
-    const projectile = {
-      lat: enemy.lat,
-      lng: enemy.lng,
-      dx: speed * Math.sin(headingRad),
-      dy: speed * Math.cos(headingRad),
-      marker: L.circleMarker([enemy.lat, enemy.lng], {
-        radius: 7,
-        color: 'purple',
-        fillColor: 'purple',
-        fillOpacity: 0.8,
-        weight: 2
-      }).addTo(map),
-      lifetime: 300 // longer lifetime for visibility
-    };
-
-    enemyProjectiles.push(projectile);
-  }
-
-  let beaconAngle = 0;
 let beaconTimer = 0;
 
 function updateBeacon(playerLat, playerLng, destLat, destLng) {
