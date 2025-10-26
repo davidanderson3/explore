@@ -2,6 +2,7 @@
   const keysPressed = {};
   const projectiles = [];
   const enemyProjectiles = [];
+  let spawnPoint = null;
 
   async function loadGeoJSON(url) {
     const response = await fetch(url);
@@ -557,7 +558,6 @@
   const STARTING_LIVES = 3;
   let playerLives = STARTING_LIVES;
   let respawnInProgress = false;
-  let spawnPoint = null;
 
   function updatePlayerHealthBar() {
     const fill = document.getElementById('playerHealthFill');
