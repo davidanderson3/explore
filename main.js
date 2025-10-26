@@ -30,8 +30,137 @@
     }
   }
 
+  const overlayElements = {
+    container: document.getElementById('startScreen'),
+    button: document.getElementById('startGameButton'),
+    countdown: document.getElementById('startCountdown'),
+    message: document.getElementById('startScreenMessage')
+  };
+  const defaultOverlayMessage = overlayElements.message ? overlayElements.message.textContent : '';
 
-  const cities = await loadGeoJSON('assets/cities.geojson');
+  const COUNTDOWN_SEQUENCE = ['3', '2', '1', 'Go!'];
+  const COUNTDOWN_DIGIT_MS = 250;
+  const COUNTDOWN_GO_MS = 400;
+  const OVERLAY_FADE_MS = 300;
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  function prepareOverlay({ message, showButton }) {
+    const { container, button, countdown, message: messageEl } = overlayElements;
+    if (!container) return;
+
+    container.classList.remove('hidden');
+    container.style.display = 'flex';
+    container.setAttribute('aria-hidden', 'false');
+
+    if (messageEl) {
+      if (typeof message === 'string') {
+        messageEl.textContent = message;
+      } else if (message === undefined) {
+        messageEl.textContent = defaultOverlayMessage;
+      }
+    }
+
+    if (countdown) {
+      countdown.textContent = '';
+    }
+
+    if (button) {
+      button.disabled = false;
+      button.style.display = showButton ? 'inline-block' : 'none';
+    }
+  }
+
+  async function playCountdown() {
+    const { countdown } = overlayElements;
+    if (!countdown) return;
+
+    for (const value of COUNTDOWN_SEQUENCE) {
+      countdown.textContent = value;
+      const delay = value === 'Go!' ? COUNTDOWN_GO_MS : COUNTDOWN_DIGIT_MS;
+      await sleep(delay);
+    }
+  }
+
+  function hideOverlay() {
+    const { container, countdown, button } = overlayElements;
+    if (!container) return;
+
+    container.classList.add('hidden');
+
+    setTimeout(() => {
+      container.style.display = 'none';
+      container.setAttribute('aria-hidden', 'true');
+      container.classList.remove('hidden');
+      if (countdown) countdown.textContent = '';
+      if (button) {
+        button.disabled = false;
+        button.style.display = 'inline-block';
+      }
+    }, OVERLAY_FADE_MS);
+  }
+
+  async function runCountdown({ showButton, message, autoStart }) {
+    const { container, button } = overlayElements;
+    if (!container) return;
+
+    prepareOverlay({ message, showButton });
+
+    if (showButton && button) {
+      requestAnimationFrame(() => {
+        if (document.activeElement !== button) {
+          button.focus();
+        }
+      });
+
+      await new Promise((resolve) => {
+        const startSequence = async () => {
+          button.removeEventListener('keydown', handleKeydown);
+          button.disabled = true;
+          await playCountdown();
+          hideOverlay();
+          resolve();
+        };
+
+        const handleKeydown = (event) => {
+          if ((event.key === 'Enter' || event.key === ' ') && !button.disabled) {
+            event.preventDefault();
+            button.click();
+          }
+        };
+
+        button.addEventListener('keydown', handleKeydown);
+        button.addEventListener('click', startSequence, { once: true });
+      });
+      return;
+    }
+
+    await new Promise((resolve) => {
+      const startSequence = async () => {
+        if (button) button.disabled = true;
+        await playCountdown();
+        hideOverlay();
+        resolve();
+      };
+
+      const delay = autoStart ? 150 : 0;
+      setTimeout(startSequence, delay);
+    });
+  }
+
+  async function waitForGameStart() {
+    await runCountdown({ showButton: true, autoStart: false });
+  }
+
+  async function runRespawnCountdown(message) {
+    await runCountdown({ showButton: false, autoStart: true, message });
+  }
+
+  const citiesPromise = loadGeoJSON('assets/cities.geojson');
+
+  await waitForGameStart();
+
+  const cities = await citiesPromise;
 
   const cityFeatures = cities.features;
   const startCityIdx = Math.floor(Math.random() * cityFeatures.length);
@@ -62,6 +191,7 @@
     lng: startCity.geometry.coordinates[0]
   };
   const GameState = { player: { lat: start.lat, lng: start.lng } };
+  spawnPoint = { lat: start.lat, lng: start.lng };
 
   const map = L.map('map', {
     zoomControl: false,
@@ -422,6 +552,91 @@
     }
   }
 
+  const playerMaxHealth = 5;
+  let playerHealth = playerMaxHealth;
+  const STARTING_LIVES = 3;
+  let playerLives = STARTING_LIVES;
+  let respawnInProgress = false;
+  let spawnPoint = null;
+
+  function updatePlayerHealthBar() {
+    const fill = document.getElementById('playerHealthFill');
+    if (fill) {
+      const percent = Math.max(0, playerHealth) / playerMaxHealth * 100;
+      fill.style.width = percent + "%";
+      fill.style.background = percent > 50
+        ? "linear-gradient(90deg, #43e97b, #38f9d7)"
+        : "linear-gradient(90deg, #e53935, #ffb300)";
+    }
+  }
+
+  function updateLivesDisplay() {
+    const livesEl = document.getElementById('livesDisplay');
+    if (livesEl) {
+      livesEl.textContent = `Lives: ${Math.max(playerLives, 0)}`;
+    }
+  }
+
+  updatePlayerHealthBar();
+  updateLivesDisplay();
+
+  function resetProjectiles() {
+    for (let i = enemyProjectiles.length - 1; i >= 0; i--) {
+      map.removeLayer(enemyProjectiles[i].marker);
+    }
+    enemyProjectiles.length = 0;
+
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      map.removeLayer(projectiles[i].marker);
+    }
+    projectiles.length = 0;
+  }
+
+  async function handlePlayerDeath(reason) {
+    if (respawnInProgress) return;
+    respawnInProgress = true;
+
+    playerLives -= 1;
+    if (playerLives < 0) playerLives = 0;
+    updateLivesDisplay();
+
+    playerHealth = playerMaxHealth;
+    updatePlayerHealthBar();
+
+    carSpeed = 0;
+    accelerating = false;
+    touchTarget = null;
+    Object.keys(keysPressed).forEach((key) => {
+      keysPressed[key] = false;
+    });
+
+    resetProjectiles();
+
+    const respawnLat = (spawnPoint && spawnPoint.lat) || GameState.player.lat;
+    const respawnLng = (spawnPoint && spawnPoint.lng) || GameState.player.lng;
+    const respawnLatLng = L.latLng(respawnLat, respawnLng);
+    playerMarker.setLatLng(respawnLatLng);
+    map.setView(respawnLatLng, map.getZoom(), { animate: false });
+    GameState.player.lat = respawnLat;
+    GameState.player.lng = respawnLng;
+    carHeading = 0;
+
+    const remainingLives = playerLives;
+    const message = remainingLives > 0
+      ? `${reason} Lives remaining: ${remainingLives}`
+      : `${reason} Out of lives! Restarting...`;
+
+    await runRespawnCountdown(message);
+
+    if (remainingLives <= 0) {
+      playerLives = STARTING_LIVES;
+      updateLivesDisplay();
+    }
+
+    respawnInProgress = false;
+    requestAnimationFrame(updateCarPosition);
+  }
+
   async function updateCarPosition() {
     try {
       const latlng = playerMarker.getLatLng();
@@ -513,9 +728,8 @@
           map.removeLayer(p.marker);
           enemyProjectiles.splice(i, 1);
           if (playerHealth <= 0) {
-            alert("Game Over! You were hit too many times.");
-            playerHealth = playerMaxHealth;
-            updatePlayerHealthBar();
+            await handlePlayerDeath('Enemy fire!');
+            return;
           }
           continue;
         }
@@ -548,9 +762,8 @@
           ]);
           map.setView(playerMarker.getLatLng());
           if (playerHealth <= 0) {
-            alert("Game Over! You crashed into the UFO!");
-            playerHealth = playerMaxHealth;
-            updatePlayerHealthBar();
+            await handlePlayerDeath('UFO collision!');
+            return;
           }
         }
       }
@@ -606,20 +819,6 @@ updateBeacon(
     };
 
     enemyProjectiles.push(projectile);
-  }
-
-  let playerHealth = 5;
-  const playerMaxHealth = 5;
-
-  function updatePlayerHealthBar() {
-    const fill = document.getElementById('playerHealthFill');
-    if (fill) {
-      const percent = Math.max(0, playerHealth) / playerMaxHealth * 100;
-      fill.style.width = percent + "%";
-      fill.style.background = percent > 50
-        ? "linear-gradient(90deg, #43e97b, #38f9d7)"
-        : "linear-gradient(90deg, #e53935, #ffb300)";
-    }
   }
 
   let beaconAngle = 0;

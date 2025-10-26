@@ -154,6 +154,19 @@ html, body {
   white-space: nowrap;
 }
 
+#livesDisplay {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  padding: 8px 14px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-weight: 600;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  z-index: 10021;
+}
+
 
 #instructions {
   position: fixed;
@@ -209,4 +222,71 @@ html, body {
   z-index: 1001 !important;
   top: 10px !important;
   right: 10px !important;
+}
+
+#startScreen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.85);
+  color: #f5f5f5;
+  z-index: 10050;
+  transition: opacity 0.3s ease;
+}
+
+#startScreen.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.start-screen__content {
+  max-width: 420px;
+  padding: 32px 28px;
+  border-radius: 16px;
+  background: rgba(20, 20, 30, 0.85);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+}
+
+.start-screen__content h1 {
+  margin: 0 0 12px;
+  font-size: 2rem;
+}
+
+.start-screen__content p {
+  margin: 0 0 24px;
+  font-size: 1.05rem;
+  color: #d0d4e4;
+}
+
+#startGameButton {
+  display: inline-block;
+  padding: 12px 28px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #111;
+  background: #43e97b;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+#startGameButton:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+#startGameButton:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(67, 233, 123, 0.25);
+}
+
+#startCountdown {
+  margin-top: 24px;
+  font-size: 2.5rem;
+  font-weight: 700;
+  letter-spacing: 4px;
+  min-height: 1.2em;
 }
