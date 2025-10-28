@@ -7,6 +7,10 @@
   let spawnPoint = null;
   let routeStart = null;
   let routeDestination = null;
+  let missionBaseText = '';
+  let missionRevertTimer = null;
+
+
 
   async function loadGeoJSON(url) {
     const response = await fetch(url);
@@ -336,9 +340,9 @@
         lng,
         dx: speed * Math.sin(headingRad),
         dy: speed * Math.cos(headingRad),
-        damage: 1,
-        color: '#ff4d4d',
-        fillColor: '#ff8585',
+        damage: 1, // Keep damage the same
+        color: '#a00000', // Darker red
+        fillColor: '#d00000', // Darker red fill
         radius: 4,
         lifetime: 110
       });
@@ -358,9 +362,9 @@
         lng,
         dx: speed * Math.sin(headingRad),
         dy: speed * Math.cos(headingRad),
-        damage: 1,
-        color: '#ff9d3c',
-        fillColor: '#ffd27f',
+        damage: 1, // Keep damage the same
+        color: '#a04000', // Darker orange
+        fillColor: '#d06000', // Darker orange fill
         radius: 5,
         lifetime: 120
       });
@@ -377,9 +381,9 @@
         lng,
         dx: speed * Math.sin(baseHeadingRad),
         dy: speed * Math.cos(baseHeadingRad),
-        damage: 1,
-        color: '#6ce4ff',
-        fillColor: '#b8f2ff',
+        damage: 1, // Keep damage the same
+        color: '#006080', // Darker cyan
+        fillColor: '#0090c0', // Darker cyan fill
         radius: 3,
         lifetime: 140,
         fillOpacity: 0.8
@@ -402,9 +406,9 @@
         lng,
         dx: speed * Math.sin(headingRad),
         dy: speed * Math.cos(headingRad),
-        damage: 1,
-        color: '#6cff9d',
-        fillColor: '#a9ffd2',
+        damage: 1, // Keep damage the same
+        color: '#006000', // Darker green
+        fillColor: '#009000', // Darker green fill
         radius: 4,
         lifetime: 115
       });
@@ -424,9 +428,9 @@
         lng,
         dx: speed * Math.sin(headingRad),
         dy: speed * Math.cos(headingRad),
-        damage: 1,
-        color: '#b57bff',
-        fillColor: '#d4b9ff',
+        damage: 1, // Keep damage the same
+        color: '#600080', // Darker purple
+        fillColor: '#9000c0', // Darker purple fill
         radius: 3,
         lifetime: 120,
         fillOpacity: 0.85
@@ -507,7 +511,7 @@
   }
 
   const ENEMY_BASE_COUNT = 75;
-  const ENEMY_PROJECTILE_SPEED_SCALE = 0.55;
+  const ENEMY_PROJECTILE_SPEED_SCALE = 0.4;
   const ENEMY_COUNT_INCREMENT = 3;
   const ENEMY_JITTER = 0.01;
   const DESTINATION_CAPTURE_RADIUS = 0.0095;
@@ -546,9 +550,9 @@
       fireChance: 0.018,
       projectile: {
         speed: 0.00038,
-        radius: 6,
-        color: '#7b42ff',
-        fillColor: '#b387ff',
+        radius: 6, // Keep radius the same
+        color: '#400080', // Darker purple
+        fillColor: '#6000b0', // Darker purple fill
         lifetime: 260,
         damage: 1,
         aim: 'player',
@@ -570,9 +574,9 @@
       fireChance: 0.022,
       projectile: {
         speed: 0.0006,
-        radius: 5,
-        color: '#1ad0ff',
-        fillColor: '#8be7ff',
+        radius: 5, // Keep radius the same
+        color: '#004080', // Darker blue
+        fillColor: '#0060b0', // Darker blue fill
         lifetime: 380,
         damage: 1,
         aim: 'player',
@@ -612,9 +616,9 @@
       fireChance: 0.014,
       projectile: {
         speed: 0.00038,
-        radius: 5,
-        color: '#db5cff',
-        fillColor: '#f3b2ff',
+        radius: 5, // Keep radius the same
+        color: '#800080', // Darker magenta
+        fillColor: '#b000b0', // Darker magenta fill
         lifetime: 260,
         damage: 1,
         aim: 'player',
@@ -665,9 +669,9 @@
       fireChance: 0.012,
       projectile: {
         speed: 0.0003,
-        radius: 9,
-        color: '#ff4d4d',
-        fillColor: '#ff9a9a',
+        radius: 9, // Keep radius the same
+        color: '#a00000', // Darker red
+        fillColor: '#d00000', // Darker red fill
         lifetime: 340,
         damage: 1,
         aim: 'player',
@@ -800,7 +804,7 @@
   function moveEnemies() {
     const nowMs = Date.now();
     const playerPos = playerMarker.getLatLng();
-    const stageVelocityScale = Math.min(1.05, 0.55 + difficultyLevel * 0.12);
+    const stageVelocityScale = Math.min(1.05, 0.4 + difficultyLevel * 0.12);
     const stageVarianceScale = Math.min(1, 0.6 + (difficultyLevel - 1) * 0.15);
     enemies.forEach((enemy) => {
       const template = enemy.template || ENEMY_TEMPLATES.gunner;
@@ -946,7 +950,7 @@ function spawnEnemyProjectile(enemy) {
   }
 
   // Apply global slow-down
-  const speed = ((projectileCfg.speed ?? 0.0003) * (typeof ENEMY_PROJECTILE_SPEED_SCALE === 'number' ? ENEMY_PROJECTILE_SPEED_SCALE : 1));
+  const speed = ((projectileCfg.speed ?? 0.0003) * (typeof ENEMY_PROJECTILE_SPEED_SCALE === 'number' ? ENEMY_PROJECTILE_SPEED_SCALE : 1)) * (1 + (difficultyLevel - 1) * 0.1);
 
   const burstCount = Math.max(1, projectileCfg.burstCount ?? 1);
   const spread = projectileCfg.burstSpread ?? 0;
@@ -965,8 +969,8 @@ function spawnEnemyProjectile(enemy) {
       lifetime: projectileCfg.lifetime ?? 300,
       marker: L.circleMarker([enemy.lat, enemy.lng], {
         radius: projectileCfg.radius ?? 7,
-        color: projectileCfg.color ?? '#ff00ff',
-        fillColor: projectileCfg.fillColor ?? projectileCfg.color ?? '#ff00ff',
+        color: projectileCfg.color ?? '#800080', // Darker default for enemy projectiles
+        fillColor: projectileCfg.fillColor ?? projectileCfg.color ?? '#b000b0', // Darker default fill
         fillOpacity: 0.85,
         weight: 2
       }).addTo(map)
@@ -1096,7 +1100,7 @@ async function fetchWikipediaContent(lat, lon) {
     healPlayer: true
   });
   setMissionMessage(`Stage ${difficultyLevel}: Neutralize ${hostilesRequiredThisStage} of ${initialEnemyCount} hostiles between ${getCityName(currentStartIdx)} and ${getCityName(currentDestIdx)}.`);
-  updateWeaponDisplay();
+  setMissionBaseMessage(`Stage ${difficultyLevel}: Neutralize ${hostilesRequiredThisStage} of ${initialEnemyCount} hostiles between ${getCityName(currentStartIdx)} and ${getCityName(currentDestIdx)}.`);
 
   function clearEnemyBombs() {
     for (let i = enemyBombs.length - 1; i >= 0; i--) {
@@ -1324,7 +1328,7 @@ async function fetchWikipediaContent(lat, lon) {
             if (nowTs - lastCaptureWarningTs > 2500) {
               const requiredRemaining = Math.max(hostilesRequiredThisStage - hostilesDestroyedThisStage, 0);
               const contacts = Math.max(requiredRemaining, enemies.length);
-              setMissionMessage(`Objective incomplete: neutralize ${requiredRemaining} more hostiles before entering ${getCityName(currentDestIdx)}. Sensors show ${contacts} contacts nearby.`);
+              showTemporaryMessage(`Objective incomplete: neutralize ${requiredRemaining} more hostiles before entering ${getCityName(currentDestIdx)}. Sensors show ${contacts} contacts nearby.`, 3500);
               lastCaptureWarningTs = nowTs;
             }
           }
@@ -1340,7 +1344,6 @@ for (let i = 0; i < wikiPlacemarks.length; i++) {
     // Full heal
     playerHealth = playerMaxHealth;
     updatePlayerHealthBar();
-    setMissionMessage(`Wiki cache found: +Full Health (${wp.title})`);
 
     // One-time pickup: mark consumed and remove the marker
     wp.consumed = true;
@@ -1474,10 +1477,25 @@ function directionBackground(direction) {
   }
 }
  
-  function setMissionMessage(text) {
-    const missionEl = document.getElementById('missionMessage');
-    if (missionEl) missionEl.textContent = text;
-  }
+function setMissionMessage(text) {
+  const missionEl = document.getElementById('missionMessage');
+  if (missionEl) missionEl.textContent = text;
+}
+
+function setMissionBaseMessage(text) {
+  missionBaseText = text;
+  setMissionMessage(text);
+}
+
+function showTemporaryMessage(text, ms = 3000) {
+  setMissionMessage(text);
+  if (missionRevertTimer) clearTimeout(missionRevertTimer);
+  missionRevertTimer = setTimeout(() => {
+    setMissionMessage(missionBaseText);
+    missionRevertTimer = null;
+  }, ms);
+}
+
 
   function updateHostilesDisplay() {
     const hostilesEl = document.getElementById('hostilesDisplay');
@@ -1488,7 +1506,7 @@ function directionBackground(direction) {
     }
     const requirement = hostilesRequiredThisStage || totalHostilesThisStage;
     const displayed = Math.min(hostilesDestroyedThisStage, requirement);
-    hostilesEl.textContent = `Hostiles neutralized: ${displayed} / ${requirement} (Total detected: ${totalHostilesThisStage})`;
+    hostilesEl.textContent = `Hostiles neutralized: ${displayed} / ${requirement}`;
   }
 
   function registerEnemyDestroyed() {
@@ -1578,7 +1596,7 @@ function directionBackground(direction) {
     return projectile;
   }
 
-  function spawnPowerUpAt(lat, lng, typeKey) {
+  function spawnPowerUpAt(lat, lng, typeKey) { // No change needed here, this is for powerup markers, not projectiles
     const template = POWERUP_TYPES[typeKey];
     if (!template) return null;
     const icon = createPowerUpIcon(template);
@@ -1630,7 +1648,7 @@ function directionBackground(direction) {
     }
     updateWeaponDisplay();
     if (template && template.label) {
-      setMissionMessage(`Weapon upgraded: ${template.label}`);
+      showTemporaryMessage(`Weapon upgraded: ${template.label}`, 3000);
     }
   }
 
@@ -1663,7 +1681,7 @@ function directionBackground(direction) {
     currentWeapon = DEFAULT_WEAPON;
     weaponExpireTime = 0;
     updateWeaponDisplay();
-    setMissionMessage('Weapon reverted to Wide Spray.');
+    showTemporaryMessage('Weapon reverted to Wide Spray.', 3000);
   }
 
 function triggerEnemyExplosion(enemy) {
@@ -1883,7 +1901,7 @@ function triggerEnemyExplosion(enemy) {
     visitedCityIndices.add(currentDestIdx);
     const nextDestIdx = findNextDestinationIndex(currentDestIdx);
     if (nextDestIdx === null || nextDestIdx === undefined) {
-      setMissionMessage(`All cities secured! Mission accomplished.`);
+      setMissionBaseMessage(`All cities secured! Mission accomplished.`);
       routeDestination = null;
       stageCleared = true;
       updateCityHighlights();
@@ -1901,7 +1919,7 @@ function triggerEnemyExplosion(enemy) {
     });
 
     const nextRequirement = hostilesRequiredThisStage || enemyCount;
-    setMissionMessage(`Stage ${completedLevel} secure! New mission: depart ${getCityName(currentStartIdx)} for ${getCityName(currentDestIdx)}. Neutralize ${nextRequirement} of ${enemyCount} hostiles en route.`);
+    setMissionBaseMessage(`Stage ${completedLevel} secure! New mission: depart ${getCityName(currentStartIdx)} for ${getCityName(currentDestIdx)}. Neutralize ${nextRequirement} of ${enemyCount} hostiles en route.`);
     stageCleared = false;
     legTransitionInProgress = false;
   }
@@ -1916,7 +1934,7 @@ function triggerEnemyExplosion(enemy) {
     const destName = getCityName(currentDestIdx);
     const displayed = requirement ? Math.min(hostilesDestroyedThisStage, requirement) : hostilesDestroyedThisStage;
     const totalText = totalHostilesThisStage ? ` (Total detected: ${totalHostilesThisStage})` : '';
-    setMissionMessage(`Route clear! Proceed to ${destName}. Hostiles neutralized: ${displayed}/${requirement || displayed}.${totalText}`);
+    setMissionBaseMessage(`Route clear! Proceed to ${destName}. Hostiles neutralized: ${displayed}/${requirement || displayed}.${totalText}`);
   }
 
   document.getElementById("closeInfoPanel").addEventListener("click", hideInfoPanel);
