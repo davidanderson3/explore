@@ -227,6 +227,13 @@
   let routeLineLayer = null;
   let totalHostilesThisStage = 0;
   let hostilesDestroyedThisStage = 0;
+  let hostilesRequiredThisStage = 0;
+
+  const powerUps = [];
+  const DEFAULT_WEAPON = 'spray';
+  let currentWeapon = DEFAULT_WEAPON;
+  let weaponExpireTime = 0;
+  const WEAPON_DURATION_MS = 25000;
 
   const map = L.map('map', {
     zoomControl: false,
@@ -277,7 +284,7 @@
     keysPressed[e.key] = true;
 
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') accelerating = true;
-    if (e.code === 'Space') fireProjectileSpray(); // <--- use spray
+    if (e.code === 'Space') fireCurrentWeapon();
   });
 
   document.addEventListener('keyup', (e) => {
@@ -314,57 +321,128 @@
     });
   }
 
-  function fireProjectile() {
-    const { lat, lng } = playerMarker.getLatLng();
-    const headingRad = carHeading * Math.PI / 180;
-    const speed = 0.01;
-
-    const projectile = {
-      lat,
-      lng,
-      dx: speed * Math.cos(headingRad),
-      dy: speed * Math.sin(headingRad),
-      marker: L.circleMarker([lat, lng], {
-        radius: 4,
-        color: 'red',
-        fillColor: 'red',
-        fillOpacity: 0.9,
-        weight: 1
-      }).addTo(map),
-      lifetime: 100
-    };
-
-    projectiles.push(projectile);
-  }
-
-  function fireProjectileSpray() {
+  function fireSprayWeapon() {
     const { lat, lng } = playerMarker.getLatLng();
     const baseHeading = carHeading;
-    const sprayCount = 5; // Number of projectiles in the spray
-    const spraySpread = 30; // Total degrees of spread
-    const speed = 0.004; // Slower, more graceful
+    const sprayCount = 5;
+    const spraySpread = 32;
+    const speed = 0.0045;
 
     for (let i = 0; i < sprayCount; i++) {
       const angle = baseHeading - spraySpread / 2 + (spraySpread / (sprayCount - 1)) * i;
       const headingRad = angle * Math.PI / 180;
-
-      const projectile = {
+      addPlayerProjectile({
         lat,
         lng,
-        dx: speed * Math.sin(headingRad), // longitude (X)
-        dy: speed * Math.cos(headingRad), // latitude (Y)
-        marker: L.circleMarker([lat, lng], {
-          radius: 4,
-          color: 'red',
-          fillColor: 'red',
-          fillOpacity: 0.9,
-          weight: 1
-        }).addTo(map),
-        lifetime: 100
-      };
-
-      projectiles.push(projectile);
+        dx: speed * Math.sin(headingRad),
+        dy: speed * Math.cos(headingRad),
+        damage: 1,
+        color: '#ff4d4d',
+        fillColor: '#ff8585',
+        radius: 4,
+        lifetime: 110
+      });
     }
+  }
+
+  function fireBurstWeapon() {
+    const { lat, lng } = playerMarker.getLatLng();
+    const baseHeading = carHeading;
+    const offsetAngles = [-5, 0, 5];
+    const speed = 0.006;
+
+    offsetAngles.forEach((offset) => {
+      const headingRad = (baseHeading + offset) * Math.PI / 180;
+      addPlayerProjectile({
+        lat,
+        lng,
+        dx: speed * Math.sin(headingRad),
+        dy: speed * Math.cos(headingRad),
+        damage: 2,
+        color: '#ff9d3c',
+        fillColor: '#ffd27f',
+        radius: 5,
+        lifetime: 120
+      });
+    });
+  }
+
+  function fireBeamWeapon() {
+    const { lat, lng } = playerMarker.getLatLng();
+    const baseHeadingRad = carHeading * Math.PI / 180;
+    for (let i = 0; i < 3; i++) {
+      const speed = 0.008 + i * 0.0015;
+      addPlayerProjectile({
+        lat,
+        lng,
+        dx: speed * Math.sin(baseHeadingRad),
+        dy: speed * Math.cos(baseHeadingRad),
+        damage: 3,
+        color: '#6ce4ff',
+        fillColor: '#b8f2ff',
+        radius: 3,
+        lifetime: 140,
+        fillOpacity: 0.8
+      });
+    }
+  }
+
+  function fireScatterWeapon() {
+    const { lat, lng } = playerMarker.getLatLng();
+    const baseHeading = carHeading;
+    const scatterCount = 7;
+    const scatterSpread = 90;
+    const speed = 0.0042;
+
+    for (let i = 0; i < scatterCount; i++) {
+      const angle = baseHeading - scatterSpread / 2 + (scatterSpread / (scatterCount - 1)) * i;
+      const headingRad = angle * Math.PI / 180;
+      addPlayerProjectile({
+        lat,
+        lng,
+        dx: speed * Math.sin(headingRad),
+        dy: speed * Math.cos(headingRad),
+        damage: 1,
+        color: '#6cff9d',
+        fillColor: '#a9ffd2',
+        radius: 4,
+        lifetime: 115
+      });
+    }
+  }
+
+  function fireNovaWeapon() {
+    const { lat, lng } = playerMarker.getLatLng();
+    const novaCount = 10;
+    const speed = 0.0035;
+
+    for (let i = 0; i < novaCount; i++) {
+      const angle = (360 / novaCount) * i;
+      const headingRad = angle * Math.PI / 180;
+      addPlayerProjectile({
+        lat,
+        lng,
+        dx: speed * Math.sin(headingRad),
+        dy: speed * Math.cos(headingRad),
+        damage: 1,
+        color: '#b57bff',
+        fillColor: '#d4b9ff',
+        radius: 3,
+        lifetime: 120,
+        fillOpacity: 0.85
+      });
+    }
+  }
+
+  function fireCurrentWeapon() {
+    const weaponMap = {
+      spray: fireSprayWeapon,
+      burst: fireBurstWeapon,
+      beam: fireBeamWeapon,
+      scatter: fireScatterWeapon,
+      nova: fireNovaWeapon
+    };
+    (weaponMap[currentWeapon] || weaponMap[DEFAULT_WEAPON])();
   }
 
   setInterval(() => {
@@ -604,6 +682,45 @@
     ['scout', 'gunner', 'charger', 'sniper', 'interceptor', 'bomber', 'tank']
   ];
 
+  const POWERUP_TYPES = {
+    spray: {
+      weapon: 'spray',
+      label: 'Wide Spray',
+      shortLabel: 'W',
+      color: '#ff7f97',
+      duration: 0,
+      spawnable: false
+    },
+    burst: {
+      weapon: 'burst',
+      label: 'Burst Cannon',
+      shortLabel: 'B',
+      color: '#ffb347',
+      duration: 28000
+    },
+    beam: {
+      weapon: 'beam',
+      label: 'Solar Beam',
+      shortLabel: 'L',
+      color: '#6ce4ff',
+      duration: 22000
+    },
+    nova: {
+      weapon: 'nova',
+      label: 'Nova Ring',
+      shortLabel: 'N',
+      color: '#b57bff',
+      duration: 24000
+    },
+    scatter: {
+      weapon: 'scatter',
+      label: 'Scatter Shot',
+      shortLabel: 'S',
+      color: '#6cff9d',
+      duration: 26000
+    }
+  };
+
   function updateEnemyHealthVisual(enemy) {
     if (!enemy.healthBar) return;
     const healthRatio = Math.max(enemy.health, 0) / enemy.maxHealth;
@@ -679,10 +796,14 @@
   function moveEnemies() {
     const nowMs = Date.now();
     const playerPos = playerMarker.getLatLng();
+    const stageVelocityScale = Math.min(1.05, 0.55 + difficultyLevel * 0.12);
+    const stageVarianceScale = Math.min(1, 0.6 + (difficultyLevel - 1) * 0.15);
     enemies.forEach((enemy) => {
       const template = enemy.template || ENEMY_TEMPLATES.gunner;
-      const variance = template.accelVariance ?? 0.00004;
-      const maxVelocity = template.maxVelocity ?? 0.0004;
+      const varianceBase = template.accelVariance ?? 0.00004;
+      const variance = varianceBase * stageVarianceScale;
+      const baseMaxVelocity = template.maxVelocity ?? 0.0004;
+      const maxVelocity = baseMaxVelocity * stageVelocityScale;
       const maxDistance = template.maxDistance ?? 0.018;
       const behavior = template.behavior ?? 'wander';
 
@@ -692,13 +813,14 @@
       if (behavior === 'charger' || behavior === 'interceptor') {
         const dLatPlayer = playerPos.lat - enemy.lat;
         const dLngPlayer = playerPos.lng - enemy.lng;
-        const force = behavior === 'charger'
+        const baseForce = behavior === 'charger'
           ? (template.chargeIntensity ?? 0.00008)
           : (template.interceptForce ?? 0.00006);
+        const force = baseForce * stageVelocityScale;
         enemy.velLat += dLatPlayer * force;
         enemy.velLng += dLngPlayer * force;
         if (behavior === 'interceptor') {
-          const lateral = template.lateralDrift ?? 0.00004;
+          const lateral = (template.lateralDrift ?? 0.00004) * stageVelocityScale;
           enemy.velLat += -dLngPlayer * lateral;
           enemy.velLng += dLatPlayer * lateral;
         }
@@ -747,8 +869,10 @@
       }
 
       if (hitEnemy) {
-        hitEnemy.health -= 1;
+        const projectileDamage = projectile.damage ?? 1;
+        hitEnemy.health -= projectileDamage;
         if (hitEnemy.health <= 0) {
+          triggerEnemyExplosion(hitEnemy);
           removeEnemy(hitEnemy);
           registerEnemyDestroyed();
           checkStageCleared();
@@ -949,7 +1073,8 @@
     resetPlayerPosition: true,
     healPlayer: true
   });
-  setMissionMessage(`Stage ${difficultyLevel}: Eliminate ${initialEnemyCount} hostiles between ${getCityName(currentStartIdx)} and ${getCityName(currentDestIdx)}.`);
+  setMissionMessage(`Stage ${difficultyLevel}: Neutralize ${hostilesRequiredThisStage} of ${initialEnemyCount} hostiles between ${getCityName(currentStartIdx)} and ${getCityName(currentDestIdx)}.`);
+  updateWeaponDisplay();
 
   function clearEnemyBombs() {
     for (let i = enemyBombs.length - 1; i >= 0; i--) {
@@ -990,6 +1115,9 @@
     });
 
     resetProjectiles();
+    currentWeapon = DEFAULT_WEAPON;
+    weaponExpireTime = 0;
+    updateWeaponDisplay();
 
     const respawnLat = (spawnPoint && spawnPoint.lat) || GameState.player.lat;
     const respawnLng = (spawnPoint && spawnPoint.lng) || GameState.player.lng;
@@ -1078,6 +1206,8 @@
       GameState.player.lat = newLat;
       GameState.player.lng = newLng;
       ensureAheadView();
+      checkPowerUpPickup(newLat, newLng);
+      handleWeaponExpiry(now);
 
       for (let i = projectiles.length - 1; i >= 0; i--) {
         const p = projectiles[i];
@@ -1170,8 +1300,9 @@
           } else {
             const nowTs = Date.now();
             if (nowTs - lastCaptureWarningTs > 2500) {
-              const remaining = Math.max(totalHostilesThisStage - hostilesDestroyedThisStage, enemies.length);
-              setMissionMessage(`Hostiles remain (${remaining} left). Eliminate all enemies before entering ${getCityName(currentDestIdx)}.`);
+              const requiredRemaining = Math.max(hostilesRequiredThisStage - hostilesDestroyedThisStage, 0);
+              const contacts = Math.max(requiredRemaining, enemies.length);
+              setMissionMessage(`Objective incomplete: neutralize ${requiredRemaining} more hostiles before entering ${getCityName(currentDestIdx)}. Sensors show ${contacts} contacts nearby.`);
               lastCaptureWarningTs = nowTs;
             }
           }
@@ -1286,11 +1417,17 @@ function directionBackground(direction) {
   function updateHostilesDisplay() {
     const hostilesEl = document.getElementById('hostilesDisplay');
     if (!hostilesEl) return;
-    hostilesEl.textContent = `Hostiles neutralized: ${hostilesDestroyedThisStage} / ${totalHostilesThisStage}`;
+    if (!totalHostilesThisStage) {
+      hostilesEl.textContent = `Hostiles neutralized: 0 / 0`;
+      return;
+    }
+    const requirement = hostilesRequiredThisStage || totalHostilesThisStage;
+    const displayed = Math.min(hostilesDestroyedThisStage, requirement);
+    hostilesEl.textContent = `Hostiles neutralized: ${displayed} / ${requirement} (Total detected: ${totalHostilesThisStage})`;
   }
 
   function registerEnemyDestroyed() {
-    hostilesDestroyedThisStage = Math.min(hostilesDestroyedThisStage + 1, totalHostilesThisStage);
+    hostilesDestroyedThisStage += 1;
     updateHostilesDisplay();
   }
 
@@ -1340,6 +1477,157 @@ function directionBackground(direction) {
       iconSize: [size, size],
       iconAnchor: [size / 2, size / 2]
     });
+  }
+
+  function createPowerUpIcon(template) {
+    const color = template.color ?? '#ffd966';
+    const short = template.shortLabel ?? 'P';
+    return L.divIcon({
+      className: 'powerup-marker',
+      html: `
+        <div class="powerup-marker__icon" style="background:${color}; box-shadow:0 0 16px ${color}90;">${short}</div>
+        <span class="powerup-marker__label">${template.label}</span>
+      `,
+      iconSize: [40, 48],
+      iconAnchor: [20, 34]
+    });
+  }
+
+  function addPlayerProjectile({ lat, lng, dx, dy, damage = 1, color = 'red', fillColor = 'red', radius = 4, lifetime = 100, fillOpacity = 0.9 }) {
+    const projectile = {
+      lat,
+      lng,
+      dx,
+      dy,
+      damage,
+      lifetime,
+      marker: L.circleMarker([lat, lng], {
+        radius,
+        color,
+        fillColor,
+        fillOpacity,
+        weight: 1
+      }).addTo(map)
+    };
+    projectiles.push(projectile);
+    return projectile;
+  }
+
+  function spawnPowerUpAt(lat, lng, typeKey) {
+    const template = POWERUP_TYPES[typeKey];
+    if (!template) return null;
+    const icon = createPowerUpIcon(template);
+    const marker = L.marker([lat, lng], {
+      icon,
+      interactive: false
+    }).addTo(map);
+    const powerUp = {
+      type: typeKey,
+      template,
+      lat,
+      lng,
+      marker
+    };
+    powerUps.push(powerUp);
+    return powerUp;
+  }
+
+  function clearPowerUps() {
+    for (let i = powerUps.length - 1; i >= 0; i--) {
+      map.removeLayer(powerUps[i].marker);
+    }
+    powerUps.length = 0;
+  }
+
+  function spawnPowerUpsForLeg(count = 3) {
+    clearPowerUps();
+    const spawnable = Object.entries(POWERUP_TYPES).filter(([, cfg]) => cfg.spawnable !== false);
+    if (!spawnable.length || !routeStart || !routeDestination) return;
+
+    shuffleArray(spawnable);
+    for (let i = 0; i < count; i++) {
+      const [typeKey, template] = spawnable[i % spawnable.length];
+      const t = Math.min(0.85, Math.max(0.15, (i + 1) / (count + 1)));
+      const basePoint = interpolateRoutePoint(t);
+      const jitterLat = (Math.random() - 0.5) * (ENEMY_JITTER * 0.5);
+      const jitterLng = (Math.random() - 0.5) * (ENEMY_JITTER * 0.5);
+      spawnPowerUpAt(basePoint.lat + jitterLat, basePoint.lng + jitterLng, typeKey);
+    }
+  }
+
+  function applyPowerUp(typeKey) {
+    const template = POWERUP_TYPES[typeKey] ?? POWERUP_TYPES[DEFAULT_WEAPON];
+    currentWeapon = template.weapon ?? DEFAULT_WEAPON;
+    if (template.duration && template.duration > 0) {
+      weaponExpireTime = Date.now() + template.duration;
+    } else {
+      weaponExpireTime = 0;
+    }
+    updateWeaponDisplay();
+    if (template && template.label) {
+      setMissionMessage(`Weapon upgraded: ${template.label}`);
+    }
+  }
+
+  function updateWeaponDisplay() {
+    const weaponEl = document.getElementById('weaponDisplay');
+    if (!weaponEl) return;
+    const template = POWERUP_TYPES[currentWeapon] ?? POWERUP_TYPES[DEFAULT_WEAPON];
+    let text = `Weapon: ${template?.label ?? 'Wide Spray'}`;
+    if (weaponExpireTime && weaponExpireTime > Date.now()) {
+      const seconds = Math.ceil((weaponExpireTime - Date.now()) / 1000);
+      text += ` (${seconds}s)`;
+    }
+    weaponEl.textContent = text;
+  }
+
+  function checkPowerUpPickup(playerLat, playerLng) {
+    for (let i = powerUps.length - 1; i >= 0; i--) {
+      const powerUp = powerUps[i];
+      if (Math.hypot(powerUp.lat - playerLat, powerUp.lng - playerLng) < 0.003) {
+        map.removeLayer(powerUp.marker);
+        powerUps.splice(i, 1);
+        applyPowerUp(powerUp.type);
+      }
+    }
+  }
+
+  function handleWeaponExpiry(now) {
+    if (currentWeapon === DEFAULT_WEAPON) return;
+    if (!weaponExpireTime || now <= weaponExpireTime) return;
+    currentWeapon = DEFAULT_WEAPON;
+    weaponExpireTime = 0;
+    updateWeaponDisplay();
+    setMissionMessage('Weapon reverted to Wide Spray.');
+  }
+
+  function triggerEnemyExplosion(enemy) {
+    const template = enemy.template || ENEMY_TEMPLATES.gunner;
+    const color = template.explosionColor || template.glowColor || '#ff8a65';
+    const explosion = L.circleMarker([enemy.lat, enemy.lng], {
+      radius: 6,
+      color,
+      fillColor: color,
+      fillOpacity: 0.75,
+      weight: 2,
+      className: 'enemy-explosion'
+    }).addTo(map);
+
+    let step = 0;
+    const maxSteps = 14;
+    const interval = setInterval(() => {
+      step += 1;
+      const progress = step / maxSteps;
+      explosion.setStyle({
+        radius: 6 + progress * 18,
+        opacity: 0.9 * (1 - progress),
+        fillOpacity: 0.7 * (1 - progress)
+      });
+      if (step >= maxSteps) {
+        clearInterval(interval);
+        map.removeLayer(explosion);
+      }
+    }, 30);
   }
 
   function clearExistingEnemies() {
@@ -1456,8 +1744,13 @@ function directionBackground(direction) {
 
     const enemyCount = spawnStageEnemies();
     totalHostilesThisStage = enemyCount ?? 0;
+    hostilesRequiredThisStage = totalHostilesThisStage
+      ? Math.max(1, Math.ceil(totalHostilesThisStage * 0.5))
+      : 0;
     hostilesDestroyedThisStage = 0;
     updateHostilesDisplay();
+    const powerUpCount = Math.min(5, 2 + Math.floor(difficultyLevel / 2));
+    spawnPowerUpsForLeg(powerUpCount);
     return enemyCount ?? 0;
   }
 
@@ -1519,18 +1812,23 @@ function directionBackground(direction) {
       healPlayer: true
     });
 
-    setMissionMessage(`Stage ${completedLevel} secure! New mission: depart ${getCityName(currentStartIdx)} for ${getCityName(currentDestIdx)}. Expect ${enemyCount} hostiles.`);
+    const nextRequirement = hostilesRequiredThisStage || enemyCount;
+    setMissionMessage(`Stage ${completedLevel} secure! New mission: depart ${getCityName(currentStartIdx)} for ${getCityName(currentDestIdx)}. Neutralize ${nextRequirement} of ${enemyCount} hostiles en route.`);
     stageCleared = false;
     legTransitionInProgress = false;
   }
 
   function checkStageCleared() {
     if (stageCleared) return;
-    if (enemies.length > 0) return;
+    const requirement = hostilesRequiredThisStage || totalHostilesThisStage;
+    const requirementMet = requirement === 0 || hostilesDestroyedThisStage >= requirement;
+    if (!requirementMet && enemies.length > 0) return;
     stageCleared = true;
-    clearEnemyBombs();
+    clearExistingEnemies();
     const destName = getCityName(currentDestIdx);
-    setMissionMessage(`Route clear! Proceed to ${destName}. Hostiles neutralized: ${hostilesDestroyedThisStage}/${totalHostilesThisStage}.`);
+    const displayed = requirement ? Math.min(hostilesDestroyedThisStage, requirement) : hostilesDestroyedThisStage;
+    const totalText = totalHostilesThisStage ? ` (Total detected: ${totalHostilesThisStage})` : '';
+    setMissionMessage(`Route clear! Proceed to ${destName}. Hostiles neutralized: ${displayed}/${requirement || displayed}.${totalText}`);
   }
 
   document.getElementById("closeInfoPanel").addEventListener("click", hideInfoPanel);
