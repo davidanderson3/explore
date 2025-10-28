@@ -506,11 +506,15 @@
     }
   }
 
-  const ENEMY_BASE_COUNT = 26;
+  const ENEMY_BASE_COUNT = 75;
+  const ENEMY_PROJECTILE_SPEED_SCALE = 0.55;
   const ENEMY_COUNT_INCREMENT = 3;
   const ENEMY_JITTER = 0.01;
   const DESTINATION_CAPTURE_RADIUS = 0.0095;
   const ROUTE_RETURN_FORCE = 0.015;
+  const HEAL_ON_WIKI_RADIUS = 0.0032;  // distance threshold for pickup
+  const wikiPlacemarks = [];           // { lat, lng, title, marker, consumed }
+
 
   const ENEMY_TEMPLATES = {
     scout: {
@@ -925,49 +929,53 @@
     });
   }
 
-  function spawnEnemyProjectile(enemy) {
-    const template = enemy.template;
-    if (!template || !template.projectile) return;
+function spawnEnemyProjectile(enemy) {
+  const template = enemy.template;
+  if (!template || !template.projectile) return;
 
-    const projectileCfg = template.projectile;
-    let baseHeading;
-    if (projectileCfg.aim === 'player') {
-      const playerPos = playerMarker.getLatLng();
-      baseHeading = Math.atan2(playerPos.lng - enemy.lng, playerPos.lat - enemy.lat);
-      baseHeading += (Math.random() - 0.5) * (projectileCfg.targetJitter ?? 0.2);
-    } else {
-      baseHeading = Math.random() * Math.PI * 2;
-    }
+  const projectileCfg = template.projectile;
 
-    const speed = projectileCfg.speed ?? 0.0003;
-
-    const burstCount = Math.max(1, projectileCfg.burstCount ?? 1);
-    const spread = projectileCfg.burstSpread ?? 0;
-    const randomJitter = projectileCfg.randomJitter ?? 0;
-
-    for (let shot = 0; shot < burstCount; shot++) {
-      const offset = spread * (shot - (burstCount - 1) / 2);
-      const headingRad = baseHeading + offset + (Math.random() - 0.5) * randomJitter;
-
-      const projectile = {
-        lat: enemy.lat,
-        lng: enemy.lng,
-        dx: speed * Math.sin(headingRad),
-        dy: speed * Math.cos(headingRad),
-        damage: projectileCfg.damage ?? 3,
-        lifetime: projectileCfg.lifetime ?? 300,
-        marker: L.circleMarker([enemy.lat, enemy.lng], {
-          radius: projectileCfg.radius ?? 7,
-          color: projectileCfg.color ?? '#ff00ff',
-          fillColor: projectileCfg.fillColor ?? projectileCfg.color ?? '#ff00ff',
-          fillOpacity: 0.85,
-          weight: 2
-        }).addTo(map)
-      };
-
-      enemyProjectiles.push(projectile);
-    }
+  // Aim
+  let baseHeading;
+  if (projectileCfg.aim === 'player') {
+    const playerPos = playerMarker.getLatLng();
+    baseHeading = Math.atan2(playerPos.lng - enemy.lng, playerPos.lat - enemy.lat);
+    baseHeading += (Math.random() - 0.5) * (projectileCfg.targetJitter ?? 0.2);
+  } else {
+    baseHeading = Math.random() * Math.PI * 2;
   }
+
+  // Apply global slow-down
+  const speed = ((projectileCfg.speed ?? 0.0003) * (typeof ENEMY_PROJECTILE_SPEED_SCALE === 'number' ? ENEMY_PROJECTILE_SPEED_SCALE : 1));
+
+  const burstCount = Math.max(1, projectileCfg.burstCount ?? 1);
+  const spread = projectileCfg.burstSpread ?? 0;
+  const randomJitter = projectileCfg.randomJitter ?? 0;
+
+  for (let shot = 0; shot < burstCount; shot++) {
+    const offset = spread * (shot - (burstCount - 1) / 2);
+    const headingRad = baseHeading + offset + (Math.random() - 0.5) * randomJitter;
+
+    const projectile = {
+      lat: enemy.lat,
+      lng: enemy.lng,
+      dx: speed * Math.sin(headingRad),
+      dy: speed * Math.cos(headingRad),
+      damage: projectileCfg.damage ?? 3,
+      lifetime: projectileCfg.lifetime ?? 300,
+      marker: L.circleMarker([enemy.lat, enemy.lng], {
+        radius: projectileCfg.radius ?? 7,
+        color: projectileCfg.color ?? '#ff00ff',
+        fillColor: projectileCfg.fillColor ?? projectileCfg.color ?? '#ff00ff',
+        fillOpacity: 0.85,
+        weight: 2
+      }).addTo(map)
+    };
+
+    enemyProjectiles.push(projectile);
+  }
+}
+
 
   function enemiesShootProjectiles() {
     const fireBoost = 1 + (difficultyLevel - 1) * 0.25;
@@ -984,61 +992,75 @@
     if (!accelerating) carSpeed += (0 - carSpeed) * 0.03; // Less friction, car coasts longer
   }, 50);
 
-  async function fetchWikipediaContent(lat, lon) {
-    console.log(`🔎 Fetching from Wikipedia near (${lat.toFixed(5)}, ${lon.toFixed(5)})`);
-    try {
-      const geoUrl = `https://en.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${lat}|${lon}&gsradius=3000&gslimit=1&format=json&origin=*`;
-      const geoResp = await fetch(geoUrl);
-      const geoData = await geoResp.json();
-      const pages = geoData.query.geosearch;
+async function fetchWikipediaContent(lat, lon) {
+  console.log(`🔎 Fetching from Wikipedia near (${lat.toFixed(5)}, ${lon.toFixed(5)})`);
+  try {
+    const geoUrl = `https://en.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${lat}|${lon}&gsradius=3000&gslimit=1&format=json&origin=*`;
+    const geoResp = await fetch(geoUrl);
+    const geoData = await geoResp.json();
+    const pages = geoData.query.geosearch;
 
-      if (!pages.length) {
-        console.log("⚠️ No nearby Wikipedia results.");
-        document.getElementById("infoPanel").style.display = "none";
-        return;
-      }
+    if (!pages.length) {
+      console.log("⚠️ No nearby Wikipedia results.");
+      document.getElementById("infoPanel").style.display = "none";
+      return;
+    }
 
-      const page = pages[0];
-      const title = page.title;
-      const urlTitle = encodeURIComponent(title.replace(/ /g, "_"));
+    const page = pages[0];
+    const title = page.title;
+    const urlTitle = encodeURIComponent(title.replace(/ /g, "_"));
 
-      L.marker([page.lat, page.lon], {
-        title: title
-      }).addTo(map).bindPopup(
+    // Create a visible placemark and store it for heal pickup
+    const wikiMarker = L.marker([page.lat, page.lon], { title })
+      .addTo(map)
+      .bindPopup(
         `<strong>${title}</strong><br><a href="https://en.wikipedia.org/wiki/${urlTitle}" target="_blank">Open on Wikipedia</a>`
       );
 
-      const extractUrl = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&titles=${urlTitle}&format=json&origin=*`;
-      const extractResp = await fetch(extractUrl);
-      const extractData = await extractResp.json();
-      const pageId = Object.keys(extractData.query.pages)[0];
-      const extract = extractData.query.pages[pageId].extract;
-
-      let imgHtml = "";
-      try {
-        const imgResp = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${urlTitle}&prop=pageimages&format=json&pithumbsize=300&origin=*`);
-        const imgData = await imgResp.json();
-        const imgPageId = Object.keys(imgData.query.pages)[0];
-        const img = imgData.query.pages[imgPageId].thumbnail?.source;
-        if (img) imgHtml = `<img src="${img}" style="max-width:100%; margin-bottom:10px;">`;
-      } catch { }
-
-      const infoPanel = document.getElementById("infoPanel");
-      infoPanel.innerHTML = `
-        <div style="margin-top: 24px;">
-          <h3>${title}</h3>
-        </div>
-        ${imgHtml}
-        <p>${extract}</p>
-        <a href="https://en.wikipedia.org/wiki/${urlTitle}" target="_blank">Read more on Wikipedia</a>
-      `;
-      infoPanel.style.display = "block";
-
-    } catch (err) {
-      console.error("🚨 Wikipedia fetch error:", err);
-      document.getElementById("infoPanel").style.display = "none";
+    // Avoid duplicates: only add if not already within a tiny epsilon
+    const already = wikiPlacemarks.some(p => Math.hypot(p.lat - page.lat, p.lng - page.lon) < 1e-5);
+    if (!already) {
+      wikiPlacemarks.push({
+        lat: page.lat,
+        lng: page.lon,
+        title,
+        marker: wikiMarker,
+        consumed: false
+      });
     }
+
+    const extractUrl = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&titles=${urlTitle}&format=json&origin=*`;
+    const extractResp = await fetch(extractUrl);
+    const extractData = await extractResp.json();
+    const pageId = Object.keys(extractData.query.pages)[0];
+    const extract = extractData.query.pages[pageId].extract;
+
+    let imgHtml = "";
+    try {
+      const imgResp = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${urlTitle}&prop=pageimages&format=json&pithumbsize=300&origin=*`);
+      const imgData = await imgResp.json();
+      const imgPageId = Object.keys(imgData.query.pages)[0];
+      const img = imgData.query.pages[imgPageId].thumbnail?.source;
+      if (img) imgHtml = `<img src="${img}" style="max-width:100%; margin-bottom:10px;">`;
+    } catch {}
+
+    const infoPanel = document.getElementById("infoPanel");
+    infoPanel.innerHTML = `
+      <div style="margin-top: 24px;">
+        <h3>${title}</h3>
+      </div>
+      ${imgHtml}
+      <p>${extract}</p>
+      <a href="https://en.wikipedia.org/wiki/${urlTitle}" target="_blank">Read more on Wikipedia</a>
+    `;
+    infoPanel.style.display = "block";
+
+  } catch (err) {
+    console.error("🚨 Wikipedia fetch error:", err);
+    document.getElementById("infoPanel").style.display = "none";
   }
+}
+
 
   const playerMaxHealth = 5;
   let playerHealth = playerMaxHealth;
@@ -1310,6 +1332,49 @@
       }
 
       requestAnimationFrame(updateCarPosition);
+      // —— Heal pickup from Wikipedia placemarks ——
+for (let i = 0; i < wikiPlacemarks.length; i++) {
+  const wp = wikiPlacemarks[i];
+  if (wp.consumed) continue;
+  if (Math.hypot(playerPos.lat - wp.lat, playerPos.lng - wp.lng) < HEAL_ON_WIKI_RADIUS) {
+    // Full heal
+    playerHealth = playerMaxHealth;
+    updatePlayerHealthBar();
+    setMissionMessage(`Wiki cache found: +Full Health (${wp.title})`);
+
+    // One-time pickup: mark consumed and remove the marker
+    wp.consumed = true;
+    if (wp.marker) {
+      map.removeLayer(wp.marker);
+      wp.marker = null;
+    }
+
+    // Small visual 'heal' pulse
+    const healPulse = L.circleMarker([wp.lat, wp.lng], {
+      radius: 18,
+      color: '#43e97b',
+      fillColor: '#38f9d7',
+      fillOpacity: 0.7,
+      weight: 2
+    }).addTo(map);
+
+    let steps = 0;
+    const maxSteps = 12;
+    const t = setInterval(() => {
+      steps++;
+      healPulse.setStyle({
+        radius: 18 + steps * 2,
+        opacity: 1 - steps / maxSteps,
+        fillOpacity: 0.7 * (1 - steps / maxSteps)
+      });
+      if (steps >= maxSteps) {
+        clearInterval(t);
+        map.removeLayer(healPulse);
+      }
+    }, 30);
+  }
+}
+
     } catch (e) {
       console.error("💥 updateCarPosition error:", e);
     }
