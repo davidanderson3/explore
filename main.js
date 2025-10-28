@@ -358,7 +358,7 @@
         lng,
         dx: speed * Math.sin(headingRad),
         dy: speed * Math.cos(headingRad),
-        damage: 2,
+        damage: 1,
         color: '#ff9d3c',
         fillColor: '#ffd27f',
         radius: 5,
@@ -377,7 +377,7 @@
         lng,
         dx: speed * Math.sin(baseHeadingRad),
         dy: speed * Math.cos(baseHeadingRad),
-        damage: 3,
+        damage: 1,
         color: '#6ce4ff',
         fillColor: '#b8f2ff',
         radius: 3,
@@ -506,7 +506,7 @@
     }
   }
 
-  const ENEMY_BASE_COUNT = 8;
+  const ENEMY_BASE_COUNT = 26;
   const ENEMY_COUNT_INCREMENT = 3;
   const ENEMY_JITTER = 0.01;
   const DESTINATION_CAPTURE_RADIUS = 0.0095;
@@ -546,7 +546,7 @@
         color: '#7b42ff',
         fillColor: '#b387ff',
         lifetime: 260,
-        damage: 2,
+        damage: 1,
         aim: 'player',
         targetJitter: 0.24
       }
@@ -570,7 +570,7 @@
         color: '#1ad0ff',
         fillColor: '#8be7ff',
         lifetime: 380,
-        damage: 3,
+        damage: 1,
         aim: 'player',
         targetJitter: 0.08
       }
@@ -604,7 +604,7 @@
       hue: 320,
       size: 72,
       glowColor: 'rgba(250, 105, 255, 0.65)',
-      collisionDamage: 2,
+      collisionDamage: 1,
       fireChance: 0.014,
       projectile: {
         speed: 0.00038,
@@ -612,7 +612,7 @@
         color: '#db5cff',
         fillColor: '#f3b2ff',
         lifetime: 260,
-        damage: 2,
+        damage: 1,
         aim: 'player',
         burstCount: 2,
         burstSpread: 14 * Math.PI / 180,
@@ -642,7 +642,7 @@
         fillOpacity: 0.55,
         triggerRadius: 0.0034,
         disarmRadius: 0.0038,
-        damage: 3,
+        damage: 1,
         lifetimeMs: 10000
       }
     },
@@ -665,7 +665,7 @@
         color: '#ff4d4d',
         fillColor: '#ff9a9a',
         lifetime: 340,
-        damage: 4,
+        damage: 1,
         aim: 'player',
         burstCount: 2,
         burstSpread: 12 * Math.PI / 180,
@@ -696,7 +696,7 @@
       label: 'Burst Cannon',
       shortLabel: 'B',
       color: '#ffb347',
-      duration: 28000
+      duration: 40000
     },
     beam: {
       weapon: 'beam',
@@ -716,7 +716,7 @@
       weapon: 'scatter',
       label: 'Scatter Shot',
       shortLabel: 'S',
-      color: '#6cff9d',
+      color: '#2b6f42ff',
       duration: 26000
     }
   };
@@ -1150,8 +1150,8 @@
       let newLat = latlng.lat;
       let newLng = latlng.lng;
 
-      if (keysPressed['ArrowLeft']) carHeading -= 1;
-      if (keysPressed['ArrowRight']) carHeading += 1;
+      if (keysPressed['ArrowLeft']) carHeading -= 2;
+      if (keysPressed['ArrowRight']) carHeading += 2;
       if (keysPressed['ArrowUp']) carSpeed += 0.003;
       if (keysPressed['ArrowDown']) carSpeed -= 0.003;
 
@@ -1601,33 +1601,56 @@ function directionBackground(direction) {
     setMissionMessage('Weapon reverted to Wide Spray.');
   }
 
-  function triggerEnemyExplosion(enemy) {
+function triggerEnemyExplosion(enemy) {
     const template = enemy.template || ENEMY_TEMPLATES.gunner;
     const color = template.explosionColor || template.glowColor || '#ff8a65';
+    
+    // Main explosion (larger and brighter)
     const explosion = L.circleMarker([enemy.lat, enemy.lng], {
-      radius: 6,
+      radius: 12,
       color,
       fillColor: color,
-      fillOpacity: 0.75,
+      fillOpacity: 0.95,
+      weight: 3,
+      className: 'enemy-explosion'
+    }).addTo(map);
+
+    // Secondary shockwave ring
+    const shockwave = L.circleMarker([enemy.lat, enemy.lng], {
+      radius: 8,
+      color: '#ffffff',
+      fillColor: color,
+      fillOpacity: 0.6,
       weight: 2,
       className: 'enemy-explosion'
     }).addTo(map);
 
     let step = 0;
-    const maxSteps = 14;
+    const maxSteps = 20;
     const interval = setInterval(() => {
       step += 1;
       const progress = step / maxSteps;
+      
+      // Main explosion grows larger
       explosion.setStyle({
-        radius: 6 + progress * 18,
-        opacity: 0.9 * (1 - progress),
-        fillOpacity: 0.7 * (1 - progress)
+        radius: 12 + progress * 32,
+        opacity: 1.0 * (1 - progress),
+        fillOpacity: 0.85 * (1 - progress)
       });
+      
+      // Shockwave expands faster
+      shockwave.setStyle({
+        radius: 8 + progress * 48,
+        opacity: 0.7 * (1 - progress * progress),
+        fillOpacity: 0.4 * (1 - progress * progress)
+      });
+      
       if (step >= maxSteps) {
         clearInterval(interval);
         map.removeLayer(explosion);
+        map.removeLayer(shockwave);
       }
-    }, 30);
+    }, 25);
   }
 
   function clearExistingEnemies() {
