@@ -467,8 +467,8 @@
     });
 
     addPlayerProjectile({
-      lat, lng, damage: 4, color: '#ff5722', fillColor: '#ffab91', radius: 6, lifetime: 400,
-      seeking: true, target: closestEnemy, turnRate: 0.08, initialSpeed: 0.005
+      lat, lng, damage: 15, color: '#ff5722', fillColor: '#ffab91', radius: 6, lifetime: 400,
+      seeking: true, target: closestEnemy, turnRate: 0.16, initialSpeed: 0.003, acceleration: 0.0001, maxSpeed: 0.009
     });
   }
 
@@ -498,7 +498,7 @@
 
       if (!pages.length) {
         console.log("⚠️ No nearby Wikipedia results.");
-        document.getElementById("infoPanel").style.display = "none";
+        document.getElementById("infoContent").innerHTML = '<p style="color: #888; text-align: center; margin-top: 50px;">Searching for nearby landmarks...</p>';
         return;
       }
 
@@ -548,7 +548,7 @@
 
     } catch (err) {
       console.error("🚨 Wikipedia fetch error:", err);
-      document.getElementById("infoPanel").style.display = "none";
+      document.getElementById("infoContent").innerHTML = '<p style="color: #888; text-align: center; margin-top: 50px;">Could not fetch landmark data.</p>';
     }
   }
 
@@ -1197,20 +1197,28 @@ function spawnEnemyProjectile(enemy) {
           // --- Homing missile logic ---
           for (let i = projectiles.length - 1; i >= 0; i--) {
             const p = projectiles[i];
-            if (p.seeking && p.target && p.target.health > 0) {
-              const targetAngle = Math.atan2(p.target.lng - p.lng, p.target.lat - p.lat);
-              const currentAngle = Math.atan2(p.dx, p.dy);
-              let angleDiff = targetAngle - currentAngle;
-              while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
-              while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+            if (p.seeking && p.target && p.target.health > 0 && p.marker) {
+              const dLat = p.target.lat - p.lat;
+              const dLng = p.target.lng - p.lng;
+              const dist = Math.hypot(dLat, dLng);
+              
+              if (dist > 0.0001) {
+                p.dx += (dLng / dist) * p.acceleration;
+                p.dy += (dLat / dist) * p.acceleration;
+              }
 
-              const turnAmount = Math.max(-p.turnRate, Math.min(p.turnRate, angleDiff));
-              const newAngle = currentAngle + turnAmount;
-              const speed = Math.hypot(p.dx, p.dy);
-              p.dx = Math.sin(newAngle) * speed;
-              p.dy = Math.cos(newAngle) * speed;
+              const currentSpeed = Math.hypot(p.dx, p.dy);
+              if (currentSpeed > p.maxSpeed) {
+                p.dx = (p.dx / currentSpeed) * p.maxSpeed;
+                p.dy = (p.dy / currentSpeed) * p.maxSpeed;
+              }
+              
+              // Add smoke trail
+              if (Math.random() < 0.5) {
+                addSmokeParticle(p.lat, p.lng);
+              }
+
             } else if (p.seeking) {
-              // Target is gone, fly straight
               p.seeking = false;
             }
           }
@@ -1564,12 +1572,39 @@ function showTemporaryMessage(text, ms = 3000) {
     });
   }
 
-  function addPlayerProjectile({ lat, lng, dx, dy, damage = 1, color = 'red', fillColor = 'red', radius = 4, lifetime = 100, fillOpacity = 0.9, seeking = false, target = null, turnRate = 0, initialSpeed = 0 }) {
+  function addSmokeParticle(lat, lng) {
+    const smoke = L.circleMarker([lat, lng], {
+      radius: 3,
+      color: '#aaa',
+      fillColor: '#888',
+      fillOpacity: 0.5,
+      weight: 0,
+      interactive: false
+    }).addTo(map);
+
+    let step = 0;
+    const maxSteps = 25;
+    const interval = setInterval(() => {
+      step++;
+      const progress = step / maxSteps;
+      smoke.setStyle({
+        radius: 3 + progress * 10,
+        fillOpacity: 0.5 * (1 - progress)
+      });
+      if (step >= maxSteps) {
+        clearInterval(interval);
+        map.removeLayer(smoke);
+      }
+    }, 30);
+  }
+
+  function addPlayerProjectile({ lat, lng, dx, dy, damage = 1, color = 'red', fillColor = 'red', radius = 4, lifetime = 100, fillOpacity = 0.9, seeking = false, target = null, turnRate = 0, initialSpeed = 0, acceleration = 0, maxSpeed = 0 }) {
     if (seeking) {
       const headingRad = carHeading * Math.PI / 180;
       dx = Math.sin(headingRad) * initialSpeed;
       dy = Math.cos(headingRad) * initialSpeed;
     }
+
 
     const projectile = {
       lat,
@@ -1581,6 +1616,8 @@ function showTemporaryMessage(text, ms = 3000) {
       marker: L.circleMarker([lat, lng], {
         seeking,
         target,
+        acceleration,
+        maxSpeed,
         turnRate,
         radius,
         color,

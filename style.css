@@ -16,25 +16,25 @@ html, body {
 
 
 #map {
-  flex: 0 0 70vw; /* fixed width: 70% of screen */
+  flex: 1; /* Allow map to grow and fill available space */
   height: 100vh;
   position: relative;
   min-width: 0;
 }
 
-
 #infoPanel {
   position: relative;
   height: 100vh;
-  width: 30vw; /* match remaining space from 70vw map */
+  width: 450px; /* Use a fixed pixel width for stability */
   max-width: none; /* remove vw-based cap */
   overflow-y: auto;
   overflow-x: hidden;
   background: rgba(255,255,255,0.92);
   color: #222;
   box-shadow: 0 2px 12px #0002;
-  padding: 48px 18px 24px 18px;
+  padding: 90px 18px 24px 18px;
   font-size: 1em;
+  box-sizing: border-box; /* Ensure padding is included in the width */
   flex-shrink: 0;
   transition: transform 0.3s ease, opacity 0.3s ease;
   opacity: 1;
