@@ -2,6 +2,7 @@
   const keysPressed = {};
   const projectiles = [];
   const enemyProjectiles = [];
+  const enemyBombs = [];
   const enemies = [];
   let spawnPoint = null;
   let routeStart = null;
@@ -427,8 +428,8 @@
     }
   }
 
-  const ENEMY_BASE_COUNT = 6;
-  const ENEMY_COUNT_INCREMENT = 2;
+  const ENEMY_BASE_COUNT = 8;
+  const ENEMY_COUNT_INCREMENT = 3;
   const ENEMY_JITTER = 0.01;
   const DESTINATION_CAPTURE_RADIUS = 0.0095;
   const ROUTE_RETURN_FORCE = 0.015;
@@ -468,7 +469,32 @@
         fillColor: '#b387ff',
         lifetime: 260,
         damage: 2,
-        aim: 'player'
+        aim: 'player',
+        targetJitter: 0.24
+      }
+    },
+    sniper: {
+      id: 'sniper',
+      label: 'Sniper',
+      health: 9,
+      accelVariance: 0.00004,
+      maxVelocity: 0.0005,
+      maxDistance: 0.02,
+      behavior: 'skirmisher',
+      hue: 200,
+      size: 74,
+      glowColor: 'rgba(84, 220, 255, 0.65)',
+      collisionDamage: 2,
+      fireChance: 0.022,
+      projectile: {
+        speed: 0.0006,
+        radius: 5,
+        color: '#1ad0ff',
+        fillColor: '#8be7ff',
+        lifetime: 380,
+        damage: 3,
+        aim: 'player',
+        targetJitter: 0.08
       }
     },
     charger: {
@@ -486,6 +512,61 @@
       glowColor: 'rgba(255, 184, 77, 0.65)',
       collisionDamage: 3,
       fireChance: 0
+    },
+    interceptor: {
+      id: 'interceptor',
+      label: 'Interceptor',
+      health: 10,
+      accelVariance: 0.00009,
+      maxVelocity: 0.00075,
+      maxDistance: 0.027,
+      behavior: 'interceptor',
+      interceptForce: 0.00009,
+      lateralDrift: 0.00004,
+      hue: 320,
+      size: 72,
+      glowColor: 'rgba(250, 105, 255, 0.65)',
+      collisionDamage: 2,
+      fireChance: 0.014,
+      projectile: {
+        speed: 0.00038,
+        radius: 5,
+        color: '#db5cff',
+        fillColor: '#f3b2ff',
+        lifetime: 260,
+        damage: 2,
+        aim: 'player',
+        burstCount: 2,
+        burstSpread: 14 * Math.PI / 180,
+        targetJitter: 0.18,
+        randomJitter: 0.08
+      }
+    },
+    bomber: {
+      id: 'bomber',
+      label: 'Bomber',
+      health: 18,
+      accelVariance: 0.00005,
+      maxVelocity: 0.00032,
+      maxDistance: 0.02,
+      behavior: 'wander',
+      hue: 30,
+      size: 86,
+      glowColor: 'rgba(255, 155, 66, 0.65)',
+      collisionDamage: 3,
+      fireChance: 0,
+      bomb: {
+        chance: 0.65,
+        cooldownMs: 3500,
+        radius: 18,
+        color: '#ff914d',
+        fillColor: '#ffcf8f',
+        fillOpacity: 0.55,
+        triggerRadius: 0.0034,
+        disarmRadius: 0.0038,
+        damage: 3,
+        lifetimeMs: 10000
+      }
     },
     tank: {
       id: 'tank',
@@ -507,15 +588,20 @@
         fillColor: '#ff9a9a',
         lifetime: 340,
         damage: 4,
-        aim: 'player'
+        aim: 'player',
+        burstCount: 2,
+        burstSpread: 12 * Math.PI / 180,
+        targetJitter: 0.15
       }
     }
   };
 
   const STAGE_TYPE_TABLE = [
     ['scout', 'gunner'],
-    ['scout', 'gunner', 'charger'],
-    ['scout', 'gunner', 'charger', 'tank']
+    ['scout', 'gunner', 'charger', 'sniper'],
+    ['scout', 'gunner', 'charger', 'sniper', 'interceptor'],
+    ['scout', 'gunner', 'charger', 'sniper', 'interceptor', 'bomber'],
+    ['scout', 'gunner', 'charger', 'sniper', 'interceptor', 'bomber', 'tank']
   ];
 
   function updateEnemyHealthVisual(enemy) {
@@ -555,7 +641,8 @@
       velLng: 0,
       marker: null,
       healthBar: null,
-      collisionDamage: template.collisionDamage ?? 1
+      collisionDamage: template.collisionDamage ?? 1,
+      lastBombTime: 0
     };
 
     enemy.marker = L.marker([enemy.lat, enemy.lng], {
@@ -590,6 +677,7 @@
   }
 
   function moveEnemies() {
+    const nowMs = Date.now();
     const playerPos = playerMarker.getLatLng();
     enemies.forEach((enemy) => {
       const template = enemy.template || ENEMY_TEMPLATES.gunner;
@@ -601,11 +689,19 @@
       enemy.velLat += (Math.random() - 0.5) * variance;
       enemy.velLng += (Math.random() - 0.5) * variance;
 
-      if (behavior === 'charger') {
+      if (behavior === 'charger' || behavior === 'interceptor') {
         const dLatPlayer = playerPos.lat - enemy.lat;
         const dLngPlayer = playerPos.lng - enemy.lng;
-        enemy.velLat += dLatPlayer * (template.chargeIntensity ?? 0.00008);
-        enemy.velLng += dLngPlayer * (template.chargeIntensity ?? 0.00008);
+        const force = behavior === 'charger'
+          ? (template.chargeIntensity ?? 0.00008)
+          : (template.interceptForce ?? 0.00006);
+        enemy.velLat += dLatPlayer * force;
+        enemy.velLng += dLngPlayer * force;
+        if (behavior === 'interceptor') {
+          const lateral = template.lateralDrift ?? 0.00004;
+          enemy.velLat += -dLngPlayer * lateral;
+          enemy.velLng += dLatPlayer * lateral;
+        }
       }
 
       enemy.velLat = Math.max(-maxVelocity, Math.min(maxVelocity, enemy.velLat));
@@ -623,12 +719,23 @@
 
       if (enemy.marker) enemy.marker.setLatLng([enemy.lat, enemy.lng]);
       updateEnemyHealthVisual(enemy);
+
+      if (template.bomb) {
+        const cooldown = template.bomb.cooldownMs ?? 4000;
+        if (nowMs - (enemy.lastBombTime ?? 0) >= cooldown) {
+          if (Math.random() < (template.bomb.chance ?? 0.5)) {
+            spawnEnemyBomb(enemy);
+          }
+          enemy.lastBombTime = nowMs;
+        }
+      }
     });
   }
 
   function handleEnemyHitByProjectiles() {
     for (let i = projectiles.length - 1; i >= 0; i--) {
       const projectile = projectiles[i];
+      let handled = false;
       let hitEnemy = null;
 
       for (let j = enemies.length - 1; j >= 0; j--) {
@@ -639,20 +746,59 @@
         }
       }
 
-      if (!hitEnemy) continue;
-
-      hitEnemy.health -= 1;
-      if (hitEnemy.health <= 0) {
-        removeEnemy(hitEnemy);
-        registerEnemyDestroyed();
-        checkStageCleared();
+      if (hitEnemy) {
+        hitEnemy.health -= 1;
+        if (hitEnemy.health <= 0) {
+          removeEnemy(hitEnemy);
+          registerEnemyDestroyed();
+          checkStageCleared();
+        } else {
+          updateEnemyHealthVisual(hitEnemy);
+        }
+        handled = true;
       } else {
-        updateEnemyHealthVisual(hitEnemy);
+        for (let j = enemyBombs.length - 1; j >= 0; j--) {
+          const bomb = enemyBombs[j];
+          if (Math.hypot(projectile.lat - bomb.lat, projectile.lng - bomb.lng) < (bomb.disarmRadius ?? 0.0035)) {
+            map.removeLayer(bomb.marker);
+            enemyBombs.splice(j, 1);
+            handled = true;
+            break;
+          }
+        }
       }
+
+      if (!handled) continue;
 
       map.removeLayer(projectile.marker);
       projectiles.splice(i, 1);
     }
+  }
+
+  function spawnEnemyBomb(enemy) {
+    const template = enemy.template;
+    if (!template || !template.bomb) return;
+
+    const bombCfg = template.bomb;
+    const marker = L.circleMarker([enemy.lat, enemy.lng], {
+      radius: bombCfg.radius ?? 16,
+      color: bombCfg.color ?? '#ff7300',
+      fillColor: bombCfg.fillColor ?? '#ffc66b',
+      fillOpacity: bombCfg.fillOpacity ?? 0.6,
+      weight: 2,
+      className: 'enemy-bomb',
+      interactive: false
+    }).addTo(map);
+
+    enemyBombs.push({
+      lat: enemy.lat,
+      lng: enemy.lng,
+      damage: bombCfg.damage ?? 3,
+      triggerRadius: bombCfg.triggerRadius ?? 0.0032,
+      disarmRadius: bombCfg.disarmRadius ?? 0.0036,
+      expiresAt: Date.now() + (bombCfg.lifetimeMs ?? 8000),
+      marker
+    });
   }
 
   function spawnEnemyProjectile(enemy) {
@@ -660,34 +806,43 @@
     if (!template || !template.projectile) return;
 
     const projectileCfg = template.projectile;
-    let headingRad;
+    let baseHeading;
     if (projectileCfg.aim === 'player') {
       const playerPos = playerMarker.getLatLng();
-      headingRad = Math.atan2(playerPos.lng - enemy.lng, playerPos.lat - enemy.lat);
-      headingRad += (Math.random() - 0.5) * 0.2;
+      baseHeading = Math.atan2(playerPos.lng - enemy.lng, playerPos.lat - enemy.lat);
+      baseHeading += (Math.random() - 0.5) * (projectileCfg.targetJitter ?? 0.2);
     } else {
-      headingRad = Math.random() * Math.PI * 2;
+      baseHeading = Math.random() * Math.PI * 2;
     }
 
     const speed = projectileCfg.speed ?? 0.0003;
 
-    const projectile = {
-      lat: enemy.lat,
-      lng: enemy.lng,
-      dx: speed * Math.sin(headingRad),
-      dy: speed * Math.cos(headingRad),
-      damage: projectileCfg.damage ?? 3,
-      lifetime: projectileCfg.lifetime ?? 300,
-      marker: L.circleMarker([enemy.lat, enemy.lng], {
-        radius: projectileCfg.radius ?? 7,
-        color: projectileCfg.color ?? '#ff00ff',
-        fillColor: projectileCfg.fillColor ?? projectileCfg.color ?? '#ff00ff',
-        fillOpacity: 0.85,
-        weight: 2
-      }).addTo(map)
-    };
+    const burstCount = Math.max(1, projectileCfg.burstCount ?? 1);
+    const spread = projectileCfg.burstSpread ?? 0;
+    const randomJitter = projectileCfg.randomJitter ?? 0;
 
-    enemyProjectiles.push(projectile);
+    for (let shot = 0; shot < burstCount; shot++) {
+      const offset = spread * (shot - (burstCount - 1) / 2);
+      const headingRad = baseHeading + offset + (Math.random() - 0.5) * randomJitter;
+
+      const projectile = {
+        lat: enemy.lat,
+        lng: enemy.lng,
+        dx: speed * Math.sin(headingRad),
+        dy: speed * Math.cos(headingRad),
+        damage: projectileCfg.damage ?? 3,
+        lifetime: projectileCfg.lifetime ?? 300,
+        marker: L.circleMarker([enemy.lat, enemy.lng], {
+          radius: projectileCfg.radius ?? 7,
+          color: projectileCfg.color ?? '#ff00ff',
+          fillColor: projectileCfg.fillColor ?? projectileCfg.color ?? '#ff00ff',
+          fillOpacity: 0.85,
+          weight: 2
+        }).addTo(map)
+      };
+
+      enemyProjectiles.push(projectile);
+    }
   }
 
   function enemiesShootProjectiles() {
@@ -796,6 +951,13 @@
   });
   setMissionMessage(`Stage ${difficultyLevel}: Eliminate ${initialEnemyCount} hostiles between ${getCityName(currentStartIdx)} and ${getCityName(currentDestIdx)}.`);
 
+  function clearEnemyBombs() {
+    for (let i = enemyBombs.length - 1; i >= 0; i--) {
+      map.removeLayer(enemyBombs[i].marker);
+    }
+    enemyBombs.length = 0;
+  }
+
   function resetProjectiles() {
     for (let i = enemyProjectiles.length - 1; i >= 0; i--) {
       map.removeLayer(enemyProjectiles[i].marker);
@@ -806,6 +968,7 @@
       map.removeLayer(projectiles[i].marker);
     }
     projectiles.length = 0;
+    clearEnemyBombs();
   }
 
   async function handlePlayerDeath(reason) {
@@ -979,6 +1142,26 @@
         }
       }
 
+      for (let i = enemyBombs.length - 1; i >= 0; i--) {
+        const bomb = enemyBombs[i];
+        if (now > bomb.expiresAt) {
+          map.removeLayer(bomb.marker);
+          enemyBombs.splice(i, 1);
+          continue;
+        }
+
+        if (Math.hypot(playerPos.lat - bomb.lat, playerPos.lng - bomb.lng) < bomb.triggerRadius) {
+          playerHealth -= bomb.damage ?? 3;
+          updatePlayerHealthBar();
+          map.removeLayer(bomb.marker);
+          enemyBombs.splice(i, 1);
+          if (playerHealth <= 0) {
+            await handlePlayerDeath('Bomber trap!');
+            return;
+          }
+        }
+      }
+
       if (routeDestination) {
         const distanceToDest = Math.hypot(routeDestination.lat - newLat, routeDestination.lng - newLng);
         if (distanceToDest < DESTINATION_CAPTURE_RADIUS) {
@@ -1111,6 +1294,13 @@ function directionBackground(direction) {
     updateHostilesDisplay();
   }
 
+  function shuffleArray(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [array[i], array[j]] = [array[j], array[i]];
+    }
+  }
+
   function getCityLatLng(index) {
     const feature = cityFeatures[index];
     if (!feature) return null;
@@ -1156,6 +1346,7 @@ function directionBackground(direction) {
     for (let i = enemies.length - 1; i >= 0; i--) {
       removeEnemy(enemies[i]);
     }
+    clearEnemyBombs();
   }
 
   function spawnStageEnemies() {
@@ -1165,12 +1356,18 @@ function directionBackground(direction) {
     const count = getStageEnemyCount(difficultyLevel);
     const availableTypes = getStageEnemyTypes(difficultyLevel);
 
+    const typePool = [...availableTypes];
+    while (typePool.length < count) {
+      typePool.push(availableTypes[Math.floor(Math.random() * availableTypes.length)]);
+    }
+    shuffleArray(typePool);
+
     for (let i = 0; i < count; i++) {
       const t = (i + 1) / (count + 1);
       const basePoint = interpolateRoutePoint(t);
       const jitterLat = (Math.random() - 0.5) * ENEMY_JITTER;
       const jitterLng = (Math.random() - 0.5) * ENEMY_JITTER;
-      const typeKey = availableTypes[Math.floor(Math.random() * availableTypes.length)];
+      const typeKey = typePool[i];
       spawnEnemyAt(basePoint.lat + jitterLat, basePoint.lng + jitterLng, typeKey);
     }
 
@@ -1331,6 +1528,7 @@ function directionBackground(direction) {
     if (stageCleared) return;
     if (enemies.length > 0) return;
     stageCleared = true;
+    clearEnemyBombs();
     const destName = getCityName(currentDestIdx);
     setMissionMessage(`Route clear! Proceed to ${destName}. Hostiles neutralized: ${hostilesDestroyedThisStage}/${totalHostilesThisStage}.`);
   }
