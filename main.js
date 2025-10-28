@@ -254,12 +254,12 @@
     crossOrigin: true
   }).addTo(map);
 
-  let currentIcon = 'assets/car.png';
+  let currentIcon = 'assets/quad.png';
   const playerMarker = L.marker([GameState.player.lat, GameState.player.lng], {
     icon: L.divIcon({
-      html: `<img src="${currentIcon}" style="width:40px;height:40px;transform: rotate(0deg); transform-origin: center center;">`,
-      iconSize: [40, 40],
-      className: ''
+      html: `<img src="${currentIcon}" style="width:50px;height:50px;transform: rotate(0deg); transform-origin: center center;">`,
+      iconSize: [50, 50],
+      className: 'player-marker'
     })
   }).addTo(map);
 
@@ -1203,15 +1203,6 @@ async function fetchWikipediaContent(lat, lon) {
 
       newLat = Math.max(-85, Math.min(85, newLat));
       newLng = ((newLng + 180) % 360 + 360) % 360 - 180;
-
-      if (currentIcon !== 'assets/car.png') {
-        currentIcon = 'assets/car.png';
-        playerMarker.setIcon(L.divIcon({
-          html: `<img src="${currentIcon}" style="width:40px;height:40px;transform: rotate(${carHeading}deg); transform-origin: center center;">`,
-          iconSize: [40, 40],
-          className: ''
-        }));
-      }
 
       playerMarker.setLatLng([newLat, newLng]);
       const iconElement = playerMarker.getElement();

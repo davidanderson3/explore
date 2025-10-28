@@ -118,10 +118,11 @@ html, body {
   animation: beaconPulse 1.5s ease-out;
 }
 
-.enemy-marker,
-.leaflet-marker-icon.enemy-marker {
+/* Ensure custom markers for player, enemies, and power-ups have no background or border */
+.player-marker, .enemy-marker, .powerup-marker {
   background: transparent !important;
   border: none !important;
+  box-shadow: none !important;
 }
 
 .enemy-marker > div {
@@ -131,14 +132,6 @@ html, body {
 .enemy-bomb {
   mix-blend-mode: screen;
   pointer-events: none;
-}
-
-.powerup-marker,
-.leaflet-marker-icon.powerup-marker {
-  background: transparent !important;
-  border: none !important;
-  pointer-events: none !important;
-  transform: translate(-50%, -50%);
 }
 
 .powerup-marker__icon {
