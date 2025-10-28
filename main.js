@@ -248,8 +248,8 @@
   let hostilesRequiredThisStage = 0;
 
   const powerUps = [];
-  const DEFAULT_WEAPON = 'spray';
-  let currentWeapon = DEFAULT_WEAPON;
+  const DEFAULT_WEAPON = 'burst';
+  let currentWeapon = 'burst';
   let weaponExpireTime = 0;
   const WEAPON_DURATION_MS = 25000;
 
@@ -452,13 +452,34 @@
     }
   }
 
+  function fireMissileWeapon() {
+    const { lat, lng } = playerMarker.getLatLng();
+
+    // Find the closest enemy
+    let closestEnemy = null;
+    let minDistance = Infinity;
+    enemies.forEach(enemy => {
+      const distance = Math.hypot(lat - enemy.lat, lng - enemy.lng);
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestEnemy = enemy;
+      }
+    });
+
+    addPlayerProjectile({
+      lat, lng, damage: 4, color: '#ff5722', fillColor: '#ffab91', radius: 6, lifetime: 400,
+      seeking: true, target: closestEnemy, turnRate: 0.08, initialSpeed: 0.005
+    });
+  }
+
   function fireCurrentWeapon() {
     const weaponMap = {
       spray: fireSprayWeapon,
       burst: fireBurstWeapon,
       beam: fireBeamWeapon,
       scatter: fireScatterWeapon,
-      nova: fireNovaWeapon
+      nova: fireNovaWeapon,
+      missile: fireMissileWeapon
     };
     (weaponMap[currentWeapon] || weaponMap[DEFAULT_WEAPON])();
   }
@@ -531,9 +552,9 @@
     }
   }
 
-  const ENEMY_BASE_COUNT = 35;
+  const ENEMY_BASE_COUNT = 15;
   const ENEMY_PROJECTILE_SPEED_SCALE = 0.4;
-  const ENEMY_COUNT_INCREMENT = 10;
+  const ENEMY_COUNT_INCREMENT = 12;
   const ENEMY_JITTER = 0.01;
   const DESTINATION_CAPTURE_RADIUS = 0.0095;
   const ROUTE_RETURN_FORCE = 0.015;
@@ -543,7 +564,7 @@
     scout: {
       id: 'scout',
       label: 'Scout',
-      health: 5,
+      health: 4,
       accelVariance: 0.00008,
       maxVelocity: 0.00065,
       maxDistance: 0.022,
@@ -557,7 +578,7 @@
     gunner: {
       id: 'gunner',
       label: 'Gunner',
-      health: 9,
+      health: 7,
       accelVariance: 0.00005,
       maxVelocity: 0.00045,
       maxDistance: 0.018,
@@ -581,7 +602,7 @@
     sniper: {
       id: 'sniper',
       label: 'Sniper',
-      health: 6,
+      health: 5,
       accelVariance: 0.00004,
       maxVelocity: 0.0005,
       maxDistance: 0.02,
@@ -605,7 +626,7 @@
     charger: {
       id: 'charger',
       label: 'Charger',
-      health: 8,
+      health: 7,
       accelVariance: 0.00007,
       maxVelocity: 0.0007,
       maxDistance: 0.024,
@@ -621,7 +642,7 @@
     interceptor: {
       id: 'interceptor',
       label: 'Interceptor',
-      health: 7,
+      health: 6,
       accelVariance: 0.00009,
       maxVelocity: 0.00075,
       maxDistance: 0.027,
@@ -650,7 +671,7 @@
     bomber: {
       id: 'bomber',
       label: 'Bomber',
-      health: 12,
+      health: 10,
       accelVariance: 0.00005,
       maxVelocity: 0.00032,
       maxDistance: 0.02,
@@ -676,7 +697,7 @@
     tank: {
       id: 'tank',
       label: 'Siege',
-      health: 16,
+      health: 14,
       accelVariance: 0.00003,
       maxVelocity: 0.00028,
       maxDistance: 0.016,
@@ -703,50 +724,64 @@
 
   const STAGE_TYPE_TABLE = [
     ['scout'], // Level 1
-    ['scout', 'gunner'], // Level 2
-    ['scout', 'gunner', 'charger'], // Level 3
-    ['scout', 'gunner', 'charger', 'sniper'], // Level 4
-    ['scout', 'gunner', 'charger', 'sniper', 'interceptor'], // Level 5
-    ['gunner', 'charger', 'sniper', 'interceptor', 'bomber'], // Level 6
-    ['gunner', 'charger', 'sniper', 'interceptor', 'bomber', 'tank'] // Level 7+
+    ['scout'], // Level 2
+    ['scout', 'gunner'], // Level 3
+    ['scout', 'gunner'], // Level 4
+    ['scout', 'gunner', 'charger'], // Level 5
+    ['gunner', 'charger', 'sniper'], // Level 6
+    ['gunner', 'charger', 'sniper', 'interceptor'], // Level 7
+    ['charger', 'sniper', 'interceptor', 'bomber'], // Level 8
+    ['gunner', 'charger', 'sniper', 'interceptor', 'bomber', 'tank'] // Level 9+
   ];
 
   const POWERUP_TYPES = {
     spray: {
       weapon: 'spray',
       label: 'Wide Spray',
-      shortLabel: 'W',
+      shortLabel: 'S',
       color: '#ff7f97',
-      duration: 0,
-      spawnable: false
+      duration: 28000,
+      rarity: 10, // Common
     },
     burst: {
       weapon: 'burst',
       label: 'Burst Cannon',
       shortLabel: 'B',
       color: '#ffb347',
-      duration: 40000
+      duration: 0, // Default weapon
+      spawnable: false,
     },
     beam: {
       weapon: 'beam',
       label: 'Solar Beam',
       shortLabel: 'L',
       color: '#6ce4ff',
-      duration: 22000
+      duration: 22000,
+      rarity: 8, // Common
     },
     nova: {
       weapon: 'nova',
       label: 'Nova Ring',
       shortLabel: 'N',
       color: '#b57bff',
-      duration: 24000
+      duration: 24000,
+      rarity: 6, // Uncommon
     },
     scatter: {
       weapon: 'scatter',
       label: 'Scatter Shot',
-      shortLabel: 'S',
+      shortLabel: 'X',
       color: '#2b6f42ff',
-      duration: 26000
+      duration: 26000,
+      rarity: 8, // Common
+    },
+    missile: {
+      weapon: 'missile',
+      label: 'Seeker Missile',
+      shortLabel: 'M',
+      color: '#ff5722',
+      duration: 35000,
+      rarity: 2, // Rare
     }
   };
 
@@ -1016,7 +1051,7 @@ function spawnEnemyProjectile(enemy) {
 
   const playerMaxHealth = 5;
   let playerHealth = playerMaxHealth;
-  const STARTING_LIVES = 3;
+  const STARTING_LIVES = 20;
   let playerLives = STARTING_LIVES;
   let respawnInProgress = false;
 
@@ -1104,14 +1139,15 @@ function spawnEnemyProjectile(enemy) {
 
     const remainingLives = playerLives;
     const message = remainingLives > 0
-      ? `${reason} Lives remaining: ${remainingLives}`
-      : `${reason} Out of lives! Restarting...`;
+      ? `${reason} Lives remaining: ${remainingLives}.`
+      : `Game Over.`;
 
     await runRespawnCountdown(message);
 
     if (remainingLives <= 0) {
-      playerLives = STARTING_LIVES;
-      updateLivesDisplay();
+      prepareOverlay({ message: 'Game Over. Refresh the page to play again.', showButton: false });
+      gamePaused = true; // Permanently pause the game
+      return; // Stop the respawn process
     }
 
     respawnInProgress = false;
@@ -1158,6 +1194,26 @@ function spawnEnemyProjectile(enemy) {
       if (iconElement instanceof HTMLElement) {
         const img = iconElement.querySelector('img');
         if (img) {
+          // --- Homing missile logic ---
+          for (let i = projectiles.length - 1; i >= 0; i--) {
+            const p = projectiles[i];
+            if (p.seeking && p.target && p.target.health > 0) {
+              const targetAngle = Math.atan2(p.target.lng - p.lng, p.target.lat - p.lat);
+              const currentAngle = Math.atan2(p.dx, p.dy);
+              let angleDiff = targetAngle - currentAngle;
+              while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+              while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+
+              const turnAmount = Math.max(-p.turnRate, Math.min(p.turnRate, angleDiff));
+              const newAngle = currentAngle + turnAmount;
+              const speed = Math.hypot(p.dx, p.dy);
+              p.dx = Math.sin(newAngle) * speed;
+              p.dy = Math.cos(newAngle) * speed;
+            } else if (p.seeking) {
+              // Target is gone, fly straight
+              p.seeking = false;
+            }
+          }
           img.style.transformOrigin = 'center center';
           img.style.transform = `rotate(${carHeading}deg)`;
         }
@@ -1508,7 +1564,13 @@ function showTemporaryMessage(text, ms = 3000) {
     });
   }
 
-  function addPlayerProjectile({ lat, lng, dx, dy, damage = 1, color = 'red', fillColor = 'red', radius = 4, lifetime = 100, fillOpacity = 0.9 }) {
+  function addPlayerProjectile({ lat, lng, dx, dy, damage = 1, color = 'red', fillColor = 'red', radius = 4, lifetime = 100, fillOpacity = 0.9, seeking = false, target = null, turnRate = 0, initialSpeed = 0 }) {
+    if (seeking) {
+      const headingRad = carHeading * Math.PI / 180;
+      dx = Math.sin(headingRad) * initialSpeed;
+      dy = Math.cos(headingRad) * initialSpeed;
+    }
+
     const projectile = {
       lat,
       lng,
@@ -1517,6 +1579,9 @@ function showTemporaryMessage(text, ms = 3000) {
       damage,
       lifetime,
       marker: L.circleMarker([lat, lng], {
+        seeking,
+        target,
+        turnRate,
         radius,
         color,
         fillColor,
@@ -1554,16 +1619,27 @@ function showTemporaryMessage(text, ms = 3000) {
     powerUps.length = 0;
   }
 
-  function maybeSpawnPowerUp(lat, lng) {
+function maybeSpawnPowerUp(lat, lng) {
     const POWERUP_DROP_CHANCE = 0.15;
     if (Math.random() < POWERUP_DROP_CHANCE) {
-      const spawnable = Object.keys(POWERUP_TYPES).filter(key => POWERUP_TYPES[key].spawnable !== false);
-      if (spawnable.length > 0) {
-        const typeKey = spawnable[Math.floor(Math.random() * spawnable.length)];
-        spawnPowerUpAt(lat, lng, typeKey);
-      }
+        const spawnable = Object.entries(POWERUP_TYPES).filter(([, v]) => v.spawnable !== false);
+        if (spawnable.length === 0) return;
+
+        const totalRarity = spawnable.reduce((sum, [, v]) => sum + (v.rarity ?? 1), 0);
+        let randomPick = Math.random() * totalRarity;
+
+        for (const [key, value] of spawnable) {
+            randomPick -= (value.rarity ?? 1);
+            if (randomPick <= 0) {
+                spawnPowerUpAt(lat, lng, key);
+                return;
+            }
+        }
+        // Fallback to the last one, just in case of floating point inaccuracies
+        const [lastKey] = spawnable[spawnable.length - 1];
+        spawnPowerUpAt(lat, lng, lastKey);
     }
-  }
+}
 
   function applyPowerUp(typeKey) {
     const template = POWERUP_TYPES[typeKey] ?? POWERUP_TYPES[DEFAULT_WEAPON];
