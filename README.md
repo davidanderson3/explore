@@ -1,4 +1,4 @@
-# World Explorer
+# World Invasion
 
 A web-based interactive exploration game built with Leaflet.
 

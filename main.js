@@ -9,7 +9,9 @@
   let routeDestination = null;
   let missionBaseText = '';
   let missionRevertTimer = null;
-
+  let gamePaused = false;
+  const wikiPlacemarks = [];
+  let beaconTimer = 0;
 
 
   async function loadGeoJSON(url) {
@@ -42,7 +44,8 @@
   const overlayElements = {
     container: document.getElementById('startScreen'),
     button: document.getElementById('startGameButton'),
-    countdown: document.getElementById('startCountdown'),
+    nextLevelButton: document.getElementById('nextLevelButton'),
+    countdown: document.getElementById('startCountdown'), 
     message: document.getElementById('startScreenMessage')
   };
   const defaultOverlayMessage = overlayElements.message ? overlayElements.message.textContent : '';
@@ -64,8 +67,8 @@
     return [aheadLat, aheadLng];
   }
 
-  function prepareOverlay({ message, showButton }) {
-    const { container, button, countdown, message: messageEl } = overlayElements;
+  function prepareOverlay({ message, showButton, buttonText }) {
+    const { container, button, nextLevelButton, countdown, message: messageEl } = overlayElements;
     if (!container) return;
 
     container.classList.remove('hidden');
@@ -85,8 +88,16 @@
     }
 
     if (button) {
-      button.disabled = false;
-      button.style.display = showButton ? 'inline-block' : 'none';
+      if (buttonText) {
+        button.textContent = buttonText;
+        button.style.display = showButton ? 'inline-block' : 'none';
+        button.disabled = false;
+        if (nextLevelButton) nextLevelButton.style.display = 'none';
+      } else {
+        button.style.display = showButton ? 'inline-block' : 'none';
+        button.disabled = false;
+        if (nextLevelButton) nextLevelButton.style.display = 'none';
+      }
     }
   }
 
@@ -470,12 +481,23 @@
       const page = pages[0];
       const title = page.title;
       const urlTitle = encodeURIComponent(title.replace(/ /g, "_"));
-
-      L.marker([page.lat, page.lon], {
+      
+      const wikiMarker = L.marker([page.lat, page.lon], {
         title: title
       }).addTo(map).bindPopup(
         `<strong>${title}</strong><br><a href="https://en.wikipedia.org/wiki/${urlTitle}" target="_blank">Open on Wikipedia</a>`
       );
+
+      const already = wikiPlacemarks.some(p => Math.hypot(p.lat - page.lat, p.lng - page.lon) < 1e-5);
+      if (!already) {
+        wikiPlacemarks.push({
+          lat: page.lat,
+          lng: page.lon,
+          title,
+          marker: wikiMarker,
+          consumed: false
+        });
+      }
 
       const extractUrl = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&titles=${urlTitle}&format=json&origin=*`;
       const extractResp = await fetch(extractUrl);
@@ -492,11 +514,7 @@
         if (img) imgHtml = `<img src="${img}" style="max-width:100%; margin-bottom:10px;">`;
       } catch { }
 
-      document.getElementById("infoContent").innerHTML = `
-  <div style="margin-top: 24px;">
-    <h3>${title}</h3>
-  </div>
-  ${imgHtml}
+      document.getElementById("infoContent").innerHTML = `<h3>${title}</h3>${imgHtml}
   <p>${extract}</p>
   <a href="https://en.wikipedia.org/wiki/${urlTitle}" target="_blank">Read more on Wikipedia</a>
 `;
@@ -510,21 +528,19 @@
     }
   }
 
-  const ENEMY_BASE_COUNT = 75;
+  const ENEMY_BASE_COUNT = 35;
   const ENEMY_PROJECTILE_SPEED_SCALE = 0.4;
-  const ENEMY_COUNT_INCREMENT = 3;
+  const ENEMY_COUNT_INCREMENT = 10;
   const ENEMY_JITTER = 0.01;
   const DESTINATION_CAPTURE_RADIUS = 0.0095;
   const ROUTE_RETURN_FORCE = 0.015;
   const HEAL_ON_WIKI_RADIUS = 0.0032;  // distance threshold for pickup
-  const wikiPlacemarks = [];           // { lat, lng, title, marker, consumed }
-
 
   const ENEMY_TEMPLATES = {
     scout: {
       id: 'scout',
       label: 'Scout',
-      health: 8,
+      health: 5,
       accelVariance: 0.00008,
       maxVelocity: 0.00065,
       maxDistance: 0.022,
@@ -538,7 +554,7 @@
     gunner: {
       id: 'gunner',
       label: 'Gunner',
-      health: 14,
+      health: 9,
       accelVariance: 0.00005,
       maxVelocity: 0.00045,
       maxDistance: 0.018,
@@ -562,7 +578,7 @@
     sniper: {
       id: 'sniper',
       label: 'Sniper',
-      health: 9,
+      health: 6,
       accelVariance: 0.00004,
       maxVelocity: 0.0005,
       maxDistance: 0.02,
@@ -586,7 +602,7 @@
     charger: {
       id: 'charger',
       label: 'Charger',
-      health: 12,
+      health: 8,
       accelVariance: 0.00007,
       maxVelocity: 0.0007,
       maxDistance: 0.024,
@@ -602,7 +618,7 @@
     interceptor: {
       id: 'interceptor',
       label: 'Interceptor',
-      health: 10,
+      health: 7,
       accelVariance: 0.00009,
       maxVelocity: 0.00075,
       maxDistance: 0.027,
@@ -631,7 +647,7 @@
     bomber: {
       id: 'bomber',
       label: 'Bomber',
-      health: 18,
+      health: 12,
       accelVariance: 0.00005,
       maxVelocity: 0.00032,
       maxDistance: 0.02,
@@ -657,7 +673,7 @@
     tank: {
       id: 'tank',
       label: 'Siege',
-      health: 24,
+      health: 16,
       accelVariance: 0.00003,
       maxVelocity: 0.00028,
       maxDistance: 0.016,
@@ -683,11 +699,13 @@
   };
 
   const STAGE_TYPE_TABLE = [
-    ['scout', 'gunner'],
-    ['scout', 'gunner', 'charger', 'sniper'],
-    ['scout', 'gunner', 'charger', 'sniper', 'interceptor'],
-    ['scout', 'gunner', 'charger', 'sniper', 'interceptor', 'bomber'],
-    ['scout', 'gunner', 'charger', 'sniper', 'interceptor', 'bomber', 'tank']
+    ['scout'], // Level 1
+    ['scout', 'gunner'], // Level 2
+    ['scout', 'gunner', 'charger'], // Level 3
+    ['scout', 'gunner', 'charger', 'sniper'], // Level 4
+    ['scout', 'gunner', 'charger', 'sniper', 'interceptor'], // Level 5
+    ['gunner', 'charger', 'sniper', 'interceptor', 'bomber'], // Level 6
+    ['gunner', 'charger', 'sniper', 'interceptor', 'bomber', 'tank'] // Level 7+
   ];
 
   const POWERUP_TYPES = {
@@ -804,7 +822,7 @@
   function moveEnemies() {
     const nowMs = Date.now();
     const playerPos = playerMarker.getLatLng();
-    const stageVelocityScale = Math.min(1.05, 0.4 + difficultyLevel * 0.12);
+    const stageVelocityScale = Math.min(1.15, 0.35 + difficultyLevel * 0.13);
     const stageVarianceScale = Math.min(1, 0.6 + (difficultyLevel - 1) * 0.15);
     enemies.forEach((enemy) => {
       const template = enemy.template || ENEMY_TEMPLATES.gunner;
@@ -881,6 +899,7 @@
         hitEnemy.health -= projectileDamage;
         if (hitEnemy.health <= 0) {
           triggerEnemyExplosion(hitEnemy);
+          maybeSpawnPowerUp(hitEnemy.lat, hitEnemy.lng);
           removeEnemy(hitEnemy);
           registerEnemyDestroyed();
           checkStageCleared();
@@ -982,7 +1001,7 @@ function spawnEnemyProjectile(enemy) {
 
 
   function enemiesShootProjectiles() {
-    const fireBoost = 1 + (difficultyLevel - 1) * 0.25;
+    const fireBoost = 1 + (difficultyLevel - 1) * 0.18;
     enemies.forEach((enemy) => {
       const template = enemy.template;
       if (!template || !template.fireChance || !template.projectile) return;
@@ -991,80 +1010,6 @@ function spawnEnemyProjectile(enemy) {
       }
     });
   }
-
-  setInterval(() => {
-    if (!accelerating) carSpeed += (0 - carSpeed) * 0.03; // Less friction, car coasts longer
-  }, 50);
-
-async function fetchWikipediaContent(lat, lon) {
-  console.log(`🔎 Fetching from Wikipedia near (${lat.toFixed(5)}, ${lon.toFixed(5)})`);
-  try {
-    const geoUrl = `https://en.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${lat}|${lon}&gsradius=3000&gslimit=1&format=json&origin=*`;
-    const geoResp = await fetch(geoUrl);
-    const geoData = await geoResp.json();
-    const pages = geoData.query.geosearch;
-
-    if (!pages.length) {
-      console.log("⚠️ No nearby Wikipedia results.");
-      document.getElementById("infoPanel").style.display = "none";
-      return;
-    }
-
-    const page = pages[0];
-    const title = page.title;
-    const urlTitle = encodeURIComponent(title.replace(/ /g, "_"));
-
-    // Create a visible placemark and store it for heal pickup
-    const wikiMarker = L.marker([page.lat, page.lon], { title })
-      .addTo(map)
-      .bindPopup(
-        `<strong>${title}</strong><br><a href="https://en.wikipedia.org/wiki/${urlTitle}" target="_blank">Open on Wikipedia</a>`
-      );
-
-    // Avoid duplicates: only add if not already within a tiny epsilon
-    const already = wikiPlacemarks.some(p => Math.hypot(p.lat - page.lat, p.lng - page.lon) < 1e-5);
-    if (!already) {
-      wikiPlacemarks.push({
-        lat: page.lat,
-        lng: page.lon,
-        title,
-        marker: wikiMarker,
-        consumed: false
-      });
-    }
-
-    const extractUrl = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&titles=${urlTitle}&format=json&origin=*`;
-    const extractResp = await fetch(extractUrl);
-    const extractData = await extractResp.json();
-    const pageId = Object.keys(extractData.query.pages)[0];
-    const extract = extractData.query.pages[pageId].extract;
-
-    let imgHtml = "";
-    try {
-      const imgResp = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${urlTitle}&prop=pageimages&format=json&pithumbsize=300&origin=*`);
-      const imgData = await imgResp.json();
-      const imgPageId = Object.keys(imgData.query.pages)[0];
-      const img = imgData.query.pages[imgPageId].thumbnail?.source;
-      if (img) imgHtml = `<img src="${img}" style="max-width:100%; margin-bottom:10px;">`;
-    } catch {}
-
-    const infoPanel = document.getElementById("infoPanel");
-    infoPanel.innerHTML = `
-      <div style="margin-top: 24px;">
-        <h3>${title}</h3>
-      </div>
-      ${imgHtml}
-      <p>${extract}</p>
-      <a href="https://en.wikipedia.org/wiki/${urlTitle}" target="_blank">Read more on Wikipedia</a>
-    `;
-    infoPanel.style.display = "block";
-
-  } catch (err) {
-    console.error("🚨 Wikipedia fetch error:", err);
-    document.getElementById("infoPanel").style.display = "none";
-  }
-}
-
 
   const playerMaxHealth = 5;
   let playerHealth = playerMaxHealth;
@@ -1172,6 +1117,7 @@ async function fetchWikipediaContent(lat, lon) {
 
   async function updateCarPosition() {
     try {
+      if (gamePaused) return;
       const latlng = playerMarker.getLatLng();
       let newLat = latlng.lat;
       let newLng = latlng.lng;
@@ -1312,7 +1258,7 @@ async function fetchWikipediaContent(lat, lon) {
       if (routeDestination) {
         const distanceToDest = Math.hypot(routeDestination.lat - newLat, routeDestination.lng - newLng);
         if (distanceToDest < DESTINATION_CAPTURE_RADIUS) {
-          if (stageCleared || enemies.length === 0) {
+          if ((stageCleared || enemies.length === 0) && !legTransitionInProgress) {
             advanceToNextCity();
           } else {
             const nowTs = Date.now();
@@ -1326,48 +1272,42 @@ async function fetchWikipediaContent(lat, lon) {
         }
       }
 
-      requestAnimationFrame(updateCarPosition);
       // —— Heal pickup from Wikipedia placemarks ——
-for (let i = 0; i < wikiPlacemarks.length; i++) {
-  const wp = wikiPlacemarks[i];
-  if (wp.consumed) continue;
-  if (Math.hypot(playerPos.lat - wp.lat, playerPos.lng - wp.lng) < HEAL_ON_WIKI_RADIUS) {
-    // Full heal
-    playerHealth = playerMaxHealth;
-    updatePlayerHealthBar();
+      for (let i = 0; i < wikiPlacemarks.length; i++) {
+        const wp = wikiPlacemarks[i];
+        if (wp.consumed) continue;
+        if (Math.hypot(playerPos.lat - wp.lat, playerPos.lng - wp.lng) < HEAL_ON_WIKI_RADIUS) {
+          // Full heal
+          playerHealth = playerMaxHealth;
+          updatePlayerHealthBar();
 
-    // One-time pickup: mark consumed and remove the marker
-    wp.consumed = true;
-    if (wp.marker) {
-      map.removeLayer(wp.marker);
-      wp.marker = null;
-    }
+          // One-time pickup: mark consumed and remove the marker
+          wp.consumed = true;
+          if (wp.marker) {
+            map.removeLayer(wp.marker);
+            wp.marker = null;
+          }
 
-    // Small visual 'heal' pulse
-    const healPulse = L.circleMarker([wp.lat, wp.lng], {
-      radius: 18,
-      color: '#43e97b',
-      fillColor: '#38f9d7',
-      fillOpacity: 0.7,
-      weight: 2
-    }).addTo(map);
+          // Small visual 'heal' pulse
+          const healPulse = L.circleMarker([wp.lat, wp.lng], {
+            radius: 18,
+            color: '#43e97b',
+            fillColor: '#38f9d7',
+            fillOpacity: 0.7,
+            weight: 2
+          }).addTo(map);
 
-    let steps = 0;
-    const maxSteps = 12;
-    const t = setInterval(() => {
-      steps++;
-      healPulse.setStyle({
-        radius: 18 + steps * 2,
-        opacity: 1 - steps / maxSteps,
-        fillOpacity: 0.7 * (1 - steps / maxSteps)
-      });
-      if (steps >= maxSteps) {
-        clearInterval(t);
-        map.removeLayer(healPulse);
+          let steps = 0;
+          const maxSteps = 12;
+          const t = setInterval(() => {
+            steps++;
+            healPulse.setStyle({ radius: 18 + steps * 2, opacity: 1 - steps / maxSteps, fillOpacity: 0.7 * (1 - steps / maxSteps) });
+            if (steps >= maxSteps) { clearInterval(t); map.removeLayer(healPulse); }
+          }, 30);
+        }
       }
-    }, 30);
-  }
-}
+
+      requestAnimationFrame(updateCarPosition);
 
     } catch (e) {
       console.error("💥 updateCarPosition error:", e);
@@ -1386,8 +1326,6 @@ for (let i = 0; i < wikiPlacemarks.length; i++) {
 
   // Start the game loop
   updateCarPosition();
-
-let beaconTimer = 0;
 
 function updateBeacon(playerLat, playerLng, destLat, destLng) {
   const now = Date.now();
@@ -1613,19 +1551,14 @@ function showTemporaryMessage(text, ms = 3000) {
     powerUps.length = 0;
   }
 
-  function spawnPowerUpsForLeg(count = 3) {
-    clearPowerUps();
-    const spawnable = Object.entries(POWERUP_TYPES).filter(([, cfg]) => cfg.spawnable !== false);
-    if (!spawnable.length || !routeStart || !routeDestination) return;
-
-    shuffleArray(spawnable);
-    for (let i = 0; i < count; i++) {
-      const [typeKey, template] = spawnable[i % spawnable.length];
-      const t = Math.min(0.85, Math.max(0.15, (i + 1) / (count + 1)));
-      const basePoint = interpolateRoutePoint(t);
-      const jitterLat = (Math.random() - 0.5) * (ENEMY_JITTER * 0.5);
-      const jitterLng = (Math.random() - 0.5) * (ENEMY_JITTER * 0.5);
-      spawnPowerUpAt(basePoint.lat + jitterLat, basePoint.lng + jitterLng, typeKey);
+  function maybeSpawnPowerUp(lat, lng) {
+    const POWERUP_DROP_CHANCE = 0.15;
+    if (Math.random() < POWERUP_DROP_CHANCE) {
+      const spawnable = Object.keys(POWERUP_TYPES).filter(key => POWERUP_TYPES[key].spawnable !== false);
+      if (spawnable.length > 0) {
+        const typeKey = spawnable[Math.floor(Math.random() * spawnable.length)];
+        spawnPowerUpAt(lat, lng, typeKey);
+      }
     }
   }
 
@@ -1841,13 +1774,13 @@ function triggerEnemyExplosion(enemy) {
 
     const enemyCount = spawnStageEnemies();
     totalHostilesThisStage = enemyCount ?? 0;
+    const requiredPercent = Math.min(0.7, 0.35 + (difficultyLevel - 1) * 0.05); // Start at 35%, increase by 5% per level, cap at 70%
     hostilesRequiredThisStage = totalHostilesThisStage
-      ? Math.max(1, Math.ceil(totalHostilesThisStage * 0.5))
+      ? Math.max(1, Math.ceil(totalHostilesThisStage * requiredPercent))
       : 0;
     hostilesDestroyedThisStage = 0;
     updateHostilesDisplay();
-    const powerUpCount = Math.min(5, 2 + Math.floor(difficultyLevel / 2));
-    spawnPowerUpsForLeg(powerUpCount);
+    clearPowerUps();
     return enemyCount ?? 0;
   }
 
@@ -1885,34 +1818,80 @@ function triggerEnemyExplosion(enemy) {
     return bestIdx;
   }
 
-  function advanceToNextCity() {
+  async function advanceToNextCity() {
     if (legTransitionInProgress) return;
     legTransitionInProgress = true;
+    gamePaused = true;
 
-    visitedCityIndices.add(currentDestIdx);
-    const nextDestIdx = findNextDestinationIndex(currentDestIdx);
-    if (nextDestIdx === null || nextDestIdx === undefined) {
-      setMissionBaseMessage(`All cities secured! Mission accomplished.`);
-      routeDestination = null;
-      stageCleared = true;
-      updateCityHighlights();
-      legTransitionInProgress = false;
-      return;
-    }
+    // Spin-in animation
+    const playerPos = playerMarker.getLatLng();
+    const destPos = routeDestination;
+    const duration = 1500; // ms
+    const startTime = Date.now();
 
-    const completedLevel = difficultyLevel;
-    difficultyLevel += 1;
-    const enemyCount = startLeg({
-      startIdx: currentDestIdx,
-      destIdx: nextDestIdx,
-      resetPlayerPosition: false,
-      healPlayer: true
-    });
+    const spinAnimation = () => {
+      const now = Date.now();
+      const elapsed = now - startTime;
+      const progress = Math.min(1, elapsed / duration);
+      const easeProgress = 0.5 - 0.5 * Math.cos(progress * Math.PI);
 
-    const nextRequirement = hostilesRequiredThisStage || enemyCount;
-    setMissionBaseMessage(`Stage ${completedLevel} secure! New mission: depart ${getCityName(currentStartIdx)} for ${getCityName(currentDestIdx)}. Neutralize ${nextRequirement} of ${enemyCount} hostiles en route.`);
-    stageCleared = false;
-    legTransitionInProgress = false;
+      const newLat = playerPos.lat + (destPos.lat - playerPos.lat) * easeProgress;
+      const newLng = playerPos.lng + (destPos.lng - playerPos.lng) * easeProgress;
+      const newHeading = carHeading + 1080 * easeProgress; // 3 full spins
+
+      playerMarker.setLatLng([newLat, newLng]);
+      const iconElement = playerMarker.getElement().querySelector('img');
+      if (iconElement) {
+        iconElement.style.transform = `rotate(${newHeading}deg)`;
+      }
+
+      if (progress < 1) {
+        requestAnimationFrame(spinAnimation);
+      } else {
+        // Animation finished, prepare for next level
+        playerMarker.setLatLng([destPos.lat, destPos.lng]);
+        GameState.player.lat = destPos.lat;
+        GameState.player.lng = destPos.lng;
+        carHeading = 0;
+        const iconElement = playerMarker.getElement().querySelector('img');
+        if (iconElement) iconElement.style.transform = `rotate(0deg)`;
+        
+        clearExistingEnemies();
+        resetProjectiles();
+
+        visitedCityIndices.add(currentDestIdx);
+        const nextDestIdx = findNextDestinationIndex(currentDestIdx);
+
+        if (nextDestIdx === null) {
+          prepareOverlay({ message: 'All cities secured! Mission Accomplished!', showButton: false });
+          return;
+        }
+
+        prepareOverlay({ message: `Stage ${difficultyLevel} Complete!`, showButton: true });
+        const startButton = overlayElements.button;
+        startButton.textContent = 'Start Next Level';
+        
+        // Use a fresh event listener to avoid stacking them
+        const oldButton = startButton.cloneNode(true);
+        startButton.parentNode.replaceChild(oldButton, startButton);
+        overlayElements.button = oldButton;
+
+        const startNext = () => {
+          hideOverlay();
+          difficultyLevel += 1;
+          const enemyCount = startLeg({ startIdx: currentDestIdx, destIdx: nextDestIdx, resetPlayerPosition: false, healPlayer: true });
+          const nextRequirement = hostilesRequiredThisStage || enemyCount;
+          setMissionBaseMessage(`Stage ${difficultyLevel}: Neutralize ${nextRequirement} of ${enemyCount} hostiles between ${getCityName(currentStartIdx)} and ${getCityName(currentDestIdx)}.`);
+          stageCleared = false;
+          gamePaused = false;
+          requestAnimationFrame(updateCarPosition);
+          legTransitionInProgress = false;
+        };
+        overlayElements.button.addEventListener('click', startNext, { once: true });
+      }
+    };
+
+    requestAnimationFrame(spinAnimation);
   }
 
   function checkStageCleared() {
@@ -1921,7 +1900,6 @@ function triggerEnemyExplosion(enemy) {
     const requirementMet = requirement === 0 || hostilesDestroyedThisStage >= requirement;
     if (!requirementMet && enemies.length > 0) return;
     stageCleared = true;
-    clearExistingEnemies();
     const destName = getCityName(currentDestIdx);
     const displayed = requirement ? Math.min(hostilesDestroyedThisStage, requirement) : hostilesDestroyedThisStage;
     const totalText = totalHostilesThisStage ? ` (Total detected: ${totalHostilesThisStage})` : '';
