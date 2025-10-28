@@ -183,6 +183,7 @@
   // Find a nearby city (closest, but not the same)
   let minDist = Infinity;
   let destCity = null;
+  let destCityIdx = null;
   for (let i = 0; i < cityFeatures.length; i++) {
     if (i === startCityIdx) continue;
     const c = cityFeatures[i];
@@ -192,6 +193,7 @@
     if (dist < minDist) {
       minDist = dist;
       destCity = c;
+      destCityIdx = i;
     }
   }
 
@@ -212,6 +214,18 @@
   spawnPoint = { lat: start.lat, lng: start.lng };
   routeStart = { ...start };
   routeDestination = { ...destinationPoint };
+  let difficultyLevel = 1;
+  let stageCleared = false;
+  let legTransitionInProgress = false;
+  let lastCaptureWarningTs = 0;
+  let currentStartIdx = startCityIdx;
+  let currentDestIdx = destCityIdx ?? startCityIdx;
+  const visitedCityIndices = new Set([startCityIdx]);
+  let originGlowMarker = null;
+  let destinationGlowMarker = null;
+  let routeLineLayer = null;
+  let totalHostilesThisStage = 0;
+  let hostilesDestroyedThisStage = 0;
 
   const map = L.map('map', {
     zoomControl: false,
@@ -413,12 +427,96 @@
     }
   }
 
-  const ENEMY_BASE_COUNT = 5;
-  const ENEMY_RESPAWN_DELAY = 4500;
+  const ENEMY_BASE_COUNT = 6;
+  const ENEMY_COUNT_INCREMENT = 2;
   const ENEMY_JITTER = 0.01;
-  const ENEMY_ACCEL_VARIANCE = 0.00004;
-  const ENEMY_MAX_VELOCITY = 0.0004;
-  const ENEMY_MAX_DISTANCE = 0.018;
+  const DESTINATION_CAPTURE_RADIUS = 0.0095;
+  const ROUTE_RETURN_FORCE = 0.015;
+
+  const ENEMY_TEMPLATES = {
+    scout: {
+      id: 'scout',
+      label: 'Scout',
+      health: 8,
+      accelVariance: 0.00008,
+      maxVelocity: 0.00065,
+      maxDistance: 0.022,
+      behavior: 'wander',
+      hue: 120,
+      size: 70,
+      glowColor: 'rgba(96, 255, 168, 0.65)',
+      collisionDamage: 1,
+      fireChance: 0
+    },
+    gunner: {
+      id: 'gunner',
+      label: 'Gunner',
+      health: 14,
+      accelVariance: 0.00005,
+      maxVelocity: 0.00045,
+      maxDistance: 0.018,
+      behavior: 'skirmisher',
+      hue: 280,
+      size: 78,
+      glowColor: 'rgba(173, 102, 255, 0.65)',
+      collisionDamage: 2,
+      fireChance: 0.018,
+      projectile: {
+        speed: 0.00038,
+        radius: 6,
+        color: '#7b42ff',
+        fillColor: '#b387ff',
+        lifetime: 260,
+        damage: 2,
+        aim: 'player'
+      }
+    },
+    charger: {
+      id: 'charger',
+      label: 'Charger',
+      health: 12,
+      accelVariance: 0.00007,
+      maxVelocity: 0.0007,
+      maxDistance: 0.024,
+      behavior: 'charger',
+      chargeIntensity: 0.00012,
+      engageRadius: 0.035,
+      hue: 40,
+      size: 76,
+      glowColor: 'rgba(255, 184, 77, 0.65)',
+      collisionDamage: 3,
+      fireChance: 0
+    },
+    tank: {
+      id: 'tank',
+      label: 'Siege',
+      health: 24,
+      accelVariance: 0.00003,
+      maxVelocity: 0.00028,
+      maxDistance: 0.016,
+      behavior: 'wander',
+      hue: 0,
+      size: 88,
+      glowColor: 'rgba(255, 92, 92, 0.6)',
+      collisionDamage: 4,
+      fireChance: 0.012,
+      projectile: {
+        speed: 0.0003,
+        radius: 9,
+        color: '#ff4d4d',
+        fillColor: '#ff9a9a',
+        lifetime: 340,
+        damage: 4,
+        aim: 'player'
+      }
+    }
+  };
+
+  const STAGE_TYPE_TABLE = [
+    ['scout', 'gunner'],
+    ['scout', 'gunner', 'charger'],
+    ['scout', 'gunner', 'charger', 'tank']
+  ];
 
   function updateEnemyHealthVisual(enemy) {
     if (!enemy.healthBar) return;
@@ -439,38 +537,40 @@
     if (idx !== -1) enemies.splice(idx, 1);
   }
 
-  function spawnEnemyAt(lat, lng) {
+  function spawnEnemyAt(lat, lng, typeKey = 'gunner') {
     const clampedLat = clampLatitude(lat);
     const normalizedLng = normalizeLongitude(lng);
+    const template = ENEMY_TEMPLATES[typeKey] || ENEMY_TEMPLATES.gunner;
 
     const enemy = {
+      type: template.id,
+      template,
       centerLat: clampedLat,
       centerLng: normalizedLng,
       lat: clampedLat,
       lng: normalizedLng,
-      health: 10,
-      maxHealth: 10,
+      health: template.health,
+      maxHealth: template.health,
       velLat: 0,
       velLng: 0,
       marker: null,
-      healthBar: null
+      healthBar: null,
+      collisionDamage: template.collisionDamage ?? 1
     };
 
     enemy.marker = L.marker([enemy.lat, enemy.lng], {
-      icon: L.divIcon({
-        html: `<img src="assets/ufo.png" style="width:80px;height:80px;">`,
-        iconSize: [80, 80],
-        className: ''
-      })
+      icon: createEnemyIcon(template)
     }).addTo(map);
+
+    const barColor = template.healthBarColor || template.glowColor || "#800000";
 
     enemy.healthBar = L.rectangle([
       [enemy.lat + 0.004, enemy.lng - 0.002],
       [enemy.lat + 0.0044, enemy.lng + 0.002]
     ], {
-      color: "#800000",
+      color: barColor,
       weight: 2,
-      fillColor: "#800000",
+      fillColor: barColor,
       fillOpacity: 0.85
     }).addTo(map);
 
@@ -489,45 +589,36 @@
     };
   }
 
-  function spawnEnemiesAlongRoute(count = ENEMY_BASE_COUNT) {
-    if (!routeStart || !routeDestination) return;
-    const needed = Math.max(0, count - enemies.length);
-    for (let i = 0; i < needed; i++) {
-      const t = (i + 1) / (count + 1);
-      const basePoint = interpolateRoutePoint(t);
-      const jitterLat = (Math.random() - 0.5) * ENEMY_JITTER;
-      const jitterLng = (Math.random() - 0.5) * ENEMY_JITTER;
-      spawnEnemyAt(basePoint.lat + jitterLat, basePoint.lng + jitterLng);
-    }
-  }
-
-  function spawnEnemyAlongRouteLater(delay = ENEMY_RESPAWN_DELAY) {
-    if (!routeStart || !routeDestination) return;
-    setTimeout(() => {
-      const t = Math.random() * 0.8 + 0.1; // avoid spawning exactly at endpoints
-      const basePoint = interpolateRoutePoint(t);
-      const jitterLat = (Math.random() - 0.5) * ENEMY_JITTER;
-      const jitterLng = (Math.random() - 0.5) * ENEMY_JITTER;
-      spawnEnemyAt(basePoint.lat + jitterLat, basePoint.lng + jitterLng);
-    }, delay);
-  }
-
   function moveEnemies() {
+    const playerPos = playerMarker.getLatLng();
     enemies.forEach((enemy) => {
-      enemy.velLat += (Math.random() - 0.5) * ENEMY_ACCEL_VARIANCE;
-      enemy.velLng += (Math.random() - 0.5) * ENEMY_ACCEL_VARIANCE;
+      const template = enemy.template || ENEMY_TEMPLATES.gunner;
+      const variance = template.accelVariance ?? 0.00004;
+      const maxVelocity = template.maxVelocity ?? 0.0004;
+      const maxDistance = template.maxDistance ?? 0.018;
+      const behavior = template.behavior ?? 'wander';
 
-      enemy.velLat = Math.max(-ENEMY_MAX_VELOCITY, Math.min(ENEMY_MAX_VELOCITY, enemy.velLat));
-      enemy.velLng = Math.max(-ENEMY_MAX_VELOCITY, Math.min(ENEMY_MAX_VELOCITY, enemy.velLng));
+      enemy.velLat += (Math.random() - 0.5) * variance;
+      enemy.velLng += (Math.random() - 0.5) * variance;
+
+      if (behavior === 'charger') {
+        const dLatPlayer = playerPos.lat - enemy.lat;
+        const dLngPlayer = playerPos.lng - enemy.lng;
+        enemy.velLat += dLatPlayer * (template.chargeIntensity ?? 0.00008);
+        enemy.velLng += dLngPlayer * (template.chargeIntensity ?? 0.00008);
+      }
+
+      enemy.velLat = Math.max(-maxVelocity, Math.min(maxVelocity, enemy.velLat));
+      enemy.velLng = Math.max(-maxVelocity, Math.min(maxVelocity, enemy.velLng));
 
       enemy.lat = clampLatitude(enemy.lat + enemy.velLat);
       enemy.lng = normalizeLongitude(enemy.lng + enemy.velLng);
 
       const dLat = enemy.lat - enemy.centerLat;
       const dLng = enemy.lng - enemy.centerLng;
-      if (Math.hypot(dLat, dLng) > ENEMY_MAX_DISTANCE) {
-        enemy.velLat -= dLat * 0.01;
-        enemy.velLng -= dLng * 0.01;
+      if (Math.hypot(dLat, dLng) > maxDistance) {
+        enemy.velLat -= dLat * ROUTE_RETURN_FORCE;
+        enemy.velLng -= dLng * ROUTE_RETURN_FORCE;
       }
 
       if (enemy.marker) enemy.marker.setLatLng([enemy.lat, enemy.lng]);
@@ -553,7 +644,8 @@
       hitEnemy.health -= 1;
       if (hitEnemy.health <= 0) {
         removeEnemy(hitEnemy);
-        spawnEnemyAlongRouteLater();
+        registerEnemyDestroyed();
+        checkStageCleared();
       } else {
         updateEnemyHealthVisual(hitEnemy);
       }
@@ -564,31 +656,46 @@
   }
 
   function spawnEnemyProjectile(enemy) {
-    const angle = Math.random() * 360;
-    const headingRad = angle * Math.PI / 180;
-    const speed = 0.0003;
+    const template = enemy.template;
+    if (!template || !template.projectile) return;
+
+    const projectileCfg = template.projectile;
+    let headingRad;
+    if (projectileCfg.aim === 'player') {
+      const playerPos = playerMarker.getLatLng();
+      headingRad = Math.atan2(playerPos.lng - enemy.lng, playerPos.lat - enemy.lat);
+      headingRad += (Math.random() - 0.5) * 0.2;
+    } else {
+      headingRad = Math.random() * Math.PI * 2;
+    }
+
+    const speed = projectileCfg.speed ?? 0.0003;
 
     const projectile = {
       lat: enemy.lat,
       lng: enemy.lng,
       dx: speed * Math.sin(headingRad),
       dy: speed * Math.cos(headingRad),
+      damage: projectileCfg.damage ?? 3,
+      lifetime: projectileCfg.lifetime ?? 300,
       marker: L.circleMarker([enemy.lat, enemy.lng], {
-        radius: 7,
-        color: 'purple',
-        fillColor: 'purple',
-        fillOpacity: 0.8,
+        radius: projectileCfg.radius ?? 7,
+        color: projectileCfg.color ?? '#ff00ff',
+        fillColor: projectileCfg.fillColor ?? projectileCfg.color ?? '#ff00ff',
+        fillOpacity: 0.85,
         weight: 2
-      }).addTo(map),
-      lifetime: 300
+      }).addTo(map)
     };
 
     enemyProjectiles.push(projectile);
   }
 
   function enemiesShootProjectiles() {
+    const fireBoost = 1 + (difficultyLevel - 1) * 0.25;
     enemies.forEach((enemy) => {
-      if (Math.random() < 0.016) {
+      const template = enemy.template;
+      if (!template || !template.fireChance || !template.projectile) return;
+      if (Math.random() < template.fireChance * fireBoost) {
         spawnEnemyProjectile(enemy);
       }
     });
@@ -680,6 +787,14 @@
 
   updatePlayerHealthBar();
   updateLivesDisplay();
+
+  const initialEnemyCount = startLeg({
+    startIdx: currentStartIdx,
+    destIdx: currentDestIdx,
+    resetPlayerPosition: true,
+    healPlayer: true
+  });
+  setMissionMessage(`Stage ${difficultyLevel}: Eliminate ${initialEnemyCount} hostiles between ${getCityName(currentStartIdx)} and ${getCityName(currentDestIdx)}.`);
 
   function resetProjectiles() {
     for (let i = enemyProjectiles.length - 1; i >= 0; i--) {
@@ -820,7 +935,7 @@
         // --- Player collision check ---
         const playerPos = playerMarker.getLatLng();
         if (Math.hypot(p.lat - playerPos.lat, p.lng - playerPos.lng) < 0.002) {
-          playerHealth -= 3; // Big health hit!
+          playerHealth -= p.damage ?? 3;
           updatePlayerHealthBar();
           map.removeLayer(p.marker);
           enemyProjectiles.splice(i, 1);
@@ -845,7 +960,7 @@
         const enemy = enemies[i];
         const distToUFO = Math.hypot(playerPos.lat - enemy.lat, playerPos.lng - enemy.lng);
         if (distToUFO < 0.0025) { // touching range
-          playerHealth -= 1;
+          playerHealth -= enemy.collisionDamage ?? 1;
           updatePlayerHealthBar();
           const angleAway = Math.atan2(playerPos.lat - enemy.lat, playerPos.lng - enemy.lng);
           const bounceDist = 0.003;
@@ -864,21 +979,37 @@
         }
       }
 
+      if (routeDestination) {
+        const distanceToDest = Math.hypot(routeDestination.lat - newLat, routeDestination.lng - newLng);
+        if (distanceToDest < DESTINATION_CAPTURE_RADIUS) {
+          if (stageCleared || enemies.length === 0) {
+            advanceToNextCity();
+          } else {
+            const nowTs = Date.now();
+            if (nowTs - lastCaptureWarningTs > 2500) {
+              const remaining = Math.max(totalHostilesThisStage - hostilesDestroyedThisStage, enemies.length);
+              setMissionMessage(`Hostiles remain (${remaining} left). Eliminate all enemies before entering ${getCityName(currentDestIdx)}.`);
+              lastCaptureWarningTs = nowTs;
+            }
+          }
+        }
+      }
+
       requestAnimationFrame(updateCarPosition);
     } catch (e) {
       console.error("💥 updateCarPosition error:", e);
     }
 
-    const beaconTarget = routeDestination || destinationPoint;
-    updateBeacon(
-      playerMarker.getLatLng().lat,
-      playerMarker.getLatLng().lng,
-      beaconTarget.lat,
-      beaconTarget.lng
-    );
+    const beaconTarget = routeDestination || routeStart || destinationPoint;
+    if (beaconTarget) {
+      updateBeacon(
+        playerMarker.getLatLng().lat,
+        playerMarker.getLatLng().lng,
+        beaconTarget.lat,
+        beaconTarget.lng
+      );
+    }
   }
-
-  spawnEnemiesAlongRoute();
 
   // Start the game loop
   updateCarPosition();
@@ -963,12 +1094,247 @@ function directionBackground(direction) {
       return '';
   }
 }
+ 
+  function setMissionMessage(text) {
+    const missionEl = document.getElementById('missionMessage');
+    if (missionEl) missionEl.textContent = text;
+  }
 
+  function updateHostilesDisplay() {
+    const hostilesEl = document.getElementById('hostilesDisplay');
+    if (!hostilesEl) return;
+    hostilesEl.textContent = `Hostiles neutralized: ${hostilesDestroyedThisStage} / ${totalHostilesThisStage}`;
+  }
 
+  function registerEnemyDestroyed() {
+    hostilesDestroyedThisStage = Math.min(hostilesDestroyedThisStage + 1, totalHostilesThisStage);
+    updateHostilesDisplay();
+  }
 
+  function getCityLatLng(index) {
+    const feature = cityFeatures[index];
+    if (!feature) return null;
+    return {
+      lat: feature.geometry.coordinates[1],
+      lng: feature.geometry.coordinates[0]
+    };
+  }
 
+  function getCityName(index) {
+    const feature = cityFeatures[index];
+    return feature ? feature.properties.NAME : 'Unknown City';
+  }
 
-console.log("glow updated");  // <-- add this
+  function getStageEnemyTypes(level) {
+    const tableIndex = Math.min(STAGE_TYPE_TABLE.length - 1, Math.max(0, level - 1));
+    return STAGE_TYPE_TABLE[tableIndex];
+  }
+
+  function getStageEnemyCount(level) {
+    return ENEMY_BASE_COUNT + (level - 1) * ENEMY_COUNT_INCREMENT;
+  }
+
+  function createEnemyIcon(template) {
+    const size = template.size ?? 80;
+    const glowColor = template.glowColor ?? 'rgba(255,255,255,0.6)';
+    const hue = template.hue ?? 0;
+    const imageSize = Math.max(30, size - 18);
+    return L.divIcon({
+      className: 'enemy-marker',
+      html: `
+        <div style="position:relative;width:${size}px;height:${size}px;">
+          <div style="position:absolute;top:50%;left:50%;width:100%;height:100%;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle, ${glowColor} 0%, rgba(0,0,0,0) 72%);opacity:0.78;"></div>
+          <img src="assets/ufo.png" alt="" style="position:absolute;top:50%;left:50%;width:${imageSize}px;height:${imageSize}px;transform:translate(-50%,-50%);filter:hue-rotate(${hue}deg) saturate(1.25);">
+        </div>
+      `,
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2]
+    });
+  }
+
+  function clearExistingEnemies() {
+    for (let i = enemies.length - 1; i >= 0; i--) {
+      removeEnemy(enemies[i]);
+    }
+  }
+
+  function spawnStageEnemies() {
+    clearExistingEnemies();
+
+    if (!routeStart || !routeDestination) return;
+    const count = getStageEnemyCount(difficultyLevel);
+    const availableTypes = getStageEnemyTypes(difficultyLevel);
+
+    for (let i = 0; i < count; i++) {
+      const t = (i + 1) / (count + 1);
+      const basePoint = interpolateRoutePoint(t);
+      const jitterLat = (Math.random() - 0.5) * ENEMY_JITTER;
+      const jitterLng = (Math.random() - 0.5) * ENEMY_JITTER;
+      const typeKey = availableTypes[Math.floor(Math.random() * availableTypes.length)];
+      spawnEnemyAt(basePoint.lat + jitterLat, basePoint.lng + jitterLng, typeKey);
+    }
+
+    if (enemies.length === 0) checkStageCleared();
+    return count;
+  }
+
+  function updateCityHighlights() {
+    if (originGlowMarker) {
+      map.removeLayer(originGlowMarker);
+      originGlowMarker = null;
+    }
+    if (destinationGlowMarker) {
+      map.removeLayer(destinationGlowMarker);
+      destinationGlowMarker = null;
+    }
+    if (routeLineLayer) {
+      map.removeLayer(routeLineLayer);
+      routeLineLayer = null;
+    }
+
+    if (!routeStart || !routeDestination) return;
+
+    originGlowMarker = L.marker([routeStart.lat, routeStart.lng], {
+      interactive: false,
+      icon: L.divIcon({
+        className: 'city-glow origin-glow',
+        html: '<div class="city-glow__pulse"></div>',
+        iconSize: [180, 180],
+        iconAnchor: [90, 90]
+      })
+    }).addTo(map);
+
+    destinationGlowMarker = L.marker([routeDestination.lat, routeDestination.lng], {
+      interactive: false,
+      icon: L.divIcon({
+        className: 'city-glow destination-glow',
+        html: '<div class="city-glow__pulse"></div>',
+        iconSize: [180, 180],
+        iconAnchor: [90, 90]
+      })
+    }).addTo(map);
+
+    routeLineLayer = L.polyline(
+      [
+        [routeStart.lat, routeStart.lng],
+        [routeDestination.lat, routeDestination.lng]
+      ],
+      {
+        color: '#55c2ff',
+        weight: 3,
+        dashArray: '10 12',
+        opacity: 0.55,
+        interactive: false
+      }
+    ).addTo(map);
+    if (routeLineLayer.bringToBack) routeLineLayer.bringToBack();
+  }
+
+  function startLeg({ startIdx, destIdx, resetPlayerPosition = false, healPlayer = false }) {
+    const startPoint = getCityLatLng(startIdx);
+    const destPoint = getCityLatLng(destIdx);
+    if (!startPoint || !destPoint) return;
+
+    currentStartIdx = startIdx;
+    currentDestIdx = destIdx;
+    routeStart = { ...startPoint };
+    routeDestination = { ...destPoint };
+    spawnPoint = { ...startPoint };
+    stageCleared = false;
+    lastCaptureWarningTs = 0;
+    updateCityHighlights();
+    resetProjectiles();
+
+    if (healPlayer) {
+      playerHealth = playerMaxHealth;
+      updatePlayerHealthBar();
+    }
+
+    if (resetPlayerPosition) {
+      playerMarker.setLatLng([startPoint.lat, startPoint.lng]);
+      GameState.player.lat = startPoint.lat;
+      GameState.player.lng = startPoint.lng;
+      ensureAheadView({ immediate: true });
+    }
+
+    const enemyCount = spawnStageEnemies();
+    totalHostilesThisStage = enemyCount ?? 0;
+    hostilesDestroyedThisStage = 0;
+    updateHostilesDisplay();
+    return enemyCount ?? 0;
+  }
+
+  function findNextDestinationIndex(fromIdx) {
+    let bestIdx = null;
+    let bestDist = Infinity;
+
+    for (let i = 0; i < cityFeatures.length; i++) {
+      if (i === fromIdx) continue;
+      if (visitedCityIndices.has(i)) continue;
+      const candidate = cityFeatures[i];
+      const dLat = candidate.geometry.coordinates[1] - cityFeatures[fromIdx].geometry.coordinates[1];
+      const dLng = candidate.geometry.coordinates[0] - cityFeatures[fromIdx].geometry.coordinates[0];
+      const dist = Math.hypot(dLat, dLng);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIdx = i;
+      }
+    }
+
+    if (bestIdx !== null) return bestIdx;
+
+    for (let i = 0; i < cityFeatures.length; i++) {
+      if (i === fromIdx) continue;
+      const candidate = cityFeatures[i];
+      const dLat = candidate.geometry.coordinates[1] - cityFeatures[fromIdx].geometry.coordinates[1];
+      const dLng = candidate.geometry.coordinates[0] - cityFeatures[fromIdx].geometry.coordinates[0];
+      const dist = Math.hypot(dLat, dLng);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIdx = i;
+      }
+    }
+
+    return bestIdx;
+  }
+
+  function advanceToNextCity() {
+    if (legTransitionInProgress) return;
+    legTransitionInProgress = true;
+
+    visitedCityIndices.add(currentDestIdx);
+    const nextDestIdx = findNextDestinationIndex(currentDestIdx);
+    if (nextDestIdx === null || nextDestIdx === undefined) {
+      setMissionMessage(`All cities secured! Mission accomplished.`);
+      routeDestination = null;
+      stageCleared = true;
+      updateCityHighlights();
+      legTransitionInProgress = false;
+      return;
+    }
+
+    const completedLevel = difficultyLevel;
+    difficultyLevel += 1;
+    const enemyCount = startLeg({
+      startIdx: currentDestIdx,
+      destIdx: nextDestIdx,
+      resetPlayerPosition: false,
+      healPlayer: true
+    });
+
+    setMissionMessage(`Stage ${completedLevel} secure! New mission: depart ${getCityName(currentStartIdx)} for ${getCityName(currentDestIdx)}. Expect ${enemyCount} hostiles.`);
+    stageCleared = false;
+    legTransitionInProgress = false;
+  }
+
+  function checkStageCleared() {
+    if (stageCleared) return;
+    if (enemies.length > 0) return;
+    stageCleared = true;
+    const destName = getCityName(currentDestIdx);
+    setMissionMessage(`Route clear! Proceed to ${destName}. Hostiles neutralized: ${hostilesDestroyedThisStage}/${totalHostilesThisStage}.`);
+  }
+
   document.getElementById("closeInfoPanel").addEventListener("click", hideInfoPanel);
 
 })();

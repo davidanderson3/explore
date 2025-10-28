@@ -118,6 +118,59 @@ html, body {
   animation: beaconPulse 1.5s ease-out;
 }
 
+.enemy-marker,
+.leaflet-marker-icon.enemy-marker {
+  background: transparent !important;
+  border: none !important;
+}
+
+.enemy-marker > div {
+  pointer-events: none;
+}
+
+.city-glow {
+  background: transparent !important;
+  border: none !important;
+  pointer-events: none !important;
+}
+
+.city-glow .city-glow__pulse {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100%;
+  height: 100%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  animation: cityGlowPulse 3s ease-in-out infinite;
+  opacity: 0.85;
+}
+
+.city-glow.origin-glow .city-glow__pulse {
+  background: radial-gradient(circle, rgba(255, 84, 84, 0.82) 0%, rgba(255, 84, 84, 0) 72%);
+  box-shadow: 0 0 28px rgba(255, 60, 60, 0.65);
+}
+
+.city-glow.destination-glow .city-glow__pulse {
+  background: radial-gradient(circle, rgba(80, 172, 255, 0.85) 0%, rgba(80, 172, 255, 0) 72%);
+  box-shadow: 0 0 28px rgba(80, 150, 255, 0.6);
+}
+
+@keyframes cityGlowPulse {
+  0% {
+    transform: translate(-50%, -50%) scale(0.9);
+    opacity: 0.72;
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.08);
+    opacity: 0.95;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(0.9);
+    opacity: 0.72;
+  }
+}
+
 
 #playerHealthBar {
   position: absolute;
@@ -170,6 +223,20 @@ html, body {
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
   z-index: 10021;
+}
+
+#hostilesDisplay {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  padding: 8px 14px;
+  background: rgba(17, 26, 65, 0.78);
+  color: #e0f3ff;
+  font-weight: 600;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  z-index: 10021;
+  letter-spacing: 0.02em;
 }
 
 
