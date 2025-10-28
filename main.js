@@ -52,7 +52,9 @@
 
   const COUNTDOWN_SEQUENCE = ['3', '2', '1', 'Go!'];
   const COUNTDOWN_DIGIT_MS = 250;
-  const COUNTDOWN_GO_MS = 400;
+  const COUNTDOWN_GO_MS = 400; 
+  const BASE_MAP_FORWARD_OFFSET = 0.012; // Original offset
+  const SPEED_AHEAD_FACTOR = 0.0048; // How much more to look ahead per unit of carSpeed
   const OVERLAY_FADE_MS = 300;
   const MAP_FORWARD_OFFSET = 0.012;
 
@@ -62,8 +64,9 @@
   const normalizeLongitude = (value) => ((value + 180) % 360 + 360) % 360 - 180;
 
   function computeAheadCenter(lat, lng, headingRad) {
-    const aheadLat = clampLatitude(lat + Math.cos(headingRad) * MAP_FORWARD_OFFSET);
-    const aheadLng = normalizeLongitude(lng + Math.sin(headingRad) * MAP_FORWARD_OFFSET);
+    const dynamicOffset = BASE_MAP_FORWARD_OFFSET + Math.abs(carSpeed) * SPEED_AHEAD_FACTOR;
+    const aheadLat = clampLatitude(lat + Math.cos(headingRad) * dynamicOffset);
+    const aheadLng = normalizeLongitude(lng + Math.sin(headingRad) * dynamicOffset);
     return [aheadLat, aheadLng];
   }
 
