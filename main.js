@@ -4,14 +4,24 @@
   const enemyProjectiles = [];
   const enemyBombs = [];
   const enemies = [];
+  const killStats = {};
+  const killStatsById = {};
+  const visitedCityNames = [];
+  const healedPlacemarks = [];
+  const completedRoutes = [];
+  const completedRouteLayers = [];
+  const routeVertices = [];
   let spawnPoint = null;
   let routeStart = null;
   let routeDestination = null;
   let missionBaseText = '';
   let missionRevertTimer = null;
   let gamePaused = false;
+  let endgameSummaryShown = false;
+  let difficultyLevel = 1;
   const wikiPlacemarks = [];
   let beaconTimer = 0;
+  const MIN_CITY_DISTANCE = 0.1;
 
 
   async function loadGeoJSON(url) {
@@ -53,8 +63,8 @@
   const COUNTDOWN_SEQUENCE = ['3', '2', '1', 'Go!'];
   const COUNTDOWN_DIGIT_MS = 250;
   const COUNTDOWN_GO_MS = 400; 
-  const BASE_MAP_FORWARD_OFFSET = 0.012; // Original offset
-  const SPEED_AHEAD_FACTOR = 0.0048; // How much more to look ahead per unit of carSpeed
+  const BASE_MAP_FORWARD_OFFSET = 0.008; // Original offset
+  const SPEED_AHEAD_FACTOR = 0.0024; // How much more to look ahead per unit of carSpeed
   const OVERLAY_FADE_MS = 300;
   const MAP_FORWARD_OFFSET = 0.012;
 
@@ -62,6 +72,15 @@
 
   const clampLatitude = (value) => Math.max(-85, Math.min(85, value));
   const normalizeLongitude = (value) => ((value + 180) % 360 + 360) % 360 - 180;
+
+  function getDistanceSettings(level) {
+    if (level === 1) return { targetDistance: 0.25, distanceVariance: 0.1 };
+    if (level === 2) return { targetDistance: 0.3, distanceVariance: 0.1 };
+    if (level === 3) return { targetDistance: 0.35, distanceVariance: 0.1 };
+    if (level === 4) return { targetDistance: 0.5, distanceVariance: 0.15 };
+    if (level === 5) return { targetDistance: 0.6, distanceVariance: 0.15 };
+    return { targetDistance: 0.75, distanceVariance: 0.2 };
+  }
 
   function computeAheadCenter(lat, lng, headingRad) {
     const dynamicOffset = BASE_MAP_FORWARD_OFFSET + Math.abs(carSpeed) * SPEED_AHEAD_FACTOR;
@@ -199,21 +218,36 @@
   const startCityIdx = Math.floor(Math.random() * cityFeatures.length);
   const startCity = cityFeatures[startCityIdx];
 
-  // Find a nearby city (closest, but not the same)
-  let minDist = Infinity;
-  let destCity = null;
-  let destCityIdx = null;
-  for (let i = 0; i < cityFeatures.length; i++) {
-    if (i === startCityIdx) continue;
-    const c = cityFeatures[i];
-    const dLat = c.geometry.coordinates[1] - startCity.geometry.coordinates[1];
-    const dLng = c.geometry.coordinates[0] - startCity.geometry.coordinates[0];
-    const dist = Math.hypot(dLat, dLng);
-    if (dist < minDist) {
-      minDist = dist;
-      destCity = c;
-      destCityIdx = i;
-    }
+  // Find a nearby city, aiming for a specific distance range
+  const { targetDistance, distanceVariance } = getDistanceSettings(difficultyLevel);
+  const TARGET_DISTANCE = targetDistance;
+  const DISTANCE_VARIANCE = distanceVariance;
+
+  const distances = cityFeatures
+    .map((c, i) => {
+      if (i === startCityIdx) return null;
+      const dLat = c.geometry.coordinates[1] - startCity.geometry.coordinates[1];
+      const dLng = c.geometry.coordinates[0] - startCity.geometry.coordinates[0];
+      const dist = Math.hypot(dLat, dLng);
+      return { index: i, city: c, distance: dist };
+    })
+    .filter(d => d && d.distance > MIN_CITY_DISTANCE);
+
+  distances.sort((a, b) => a.distance - b.distance);
+
+  // Find a city within the desired distance range
+  let suitableCity = distances.find(d => d.distance >= TARGET_DISTANCE - DISTANCE_VARIANCE && d.distance <= TARGET_DISTANCE + DISTANCE_VARIANCE);
+
+  // If no city is in the ideal range, find the one closest to the target distance
+  if (!suitableCity) {
+    suitableCity = distances.sort((a, b) => Math.abs(a.distance - TARGET_DISTANCE) - Math.abs(b.distance - TARGET_DISTANCE))[0];
+  }
+
+  const destCity = suitableCity.city;
+  const destCityIdx = suitableCity.index;
+
+  if (startCity?.properties?.NAME && !visitedCityNames.includes(startCity.properties.NAME)) {
+    visitedCityNames.push(startCity.properties.NAME);
   }
 
   // Show the message
@@ -233,7 +267,6 @@
   spawnPoint = { lat: start.lat, lng: start.lng };
   routeStart = { ...start };
   routeDestination = { ...destinationPoint };
-  let difficultyLevel = 1;
   let stageCleared = false;
   let legTransitionInProgress = false;
   let lastCaptureWarningTs = 0;
@@ -246,6 +279,9 @@
   let totalHostilesThisStage = 0;
   let hostilesDestroyedThisStage = 0;
   let hostilesRequiredThisStage = 0;
+  let boss = null;
+  let bossFightActive = false;
+  let bossDefeated = false;
 
   const powerUps = [];
   const DEFAULT_WEAPON = 'burst';
@@ -456,19 +492,22 @@
     const { lat, lng } = playerMarker.getLatLng();
 
     // Find the closest enemy
-    let closestEnemy = null;
-    let minDistance = Infinity;
-    enemies.forEach(enemy => {
-      const distance = Math.hypot(lat - enemy.lat, lng - enemy.lng);
-      if (distance < minDistance) {
-        minDistance = distance;
-        closestEnemy = enemy;
-      }
-    });
+    const closestEnemy = findNearestEnemy(lat, lng);
 
     addPlayerProjectile({
-      lat, lng, damage: 15, color: '#ff5722', fillColor: '#ffab91', radius: 6, lifetime: 400,
-      seeking: true, target: closestEnemy, turnRate: 0.16, initialSpeed: 0.003, acceleration: 0.0001, maxSpeed: 0.009
+      lat,
+      lng,
+      damage: 14,
+      color: '#ff7043',
+      fillColor: '#ffbfa6',
+      radius: 6,
+      lifetime: 420,
+      seeking: true,
+      target: closestEnemy,
+      turnRate: 0.18,
+      initialSpeed: 0.0016,
+      acceleration: 0.00007,
+      maxSpeed: 0.0048
     });
   }
 
@@ -505,11 +544,12 @@
       const page = pages[0];
       const title = page.title;
       const urlTitle = encodeURIComponent(title.replace(/ /g, "_"));
+      const wikiUrl = `https://en.wikipedia.org/wiki/${urlTitle}`;
       
       const wikiMarker = L.marker([page.lat, page.lon], {
         title: title
       }).addTo(map).bindPopup(
-        `<strong>${title}</strong><br><a href="https://en.wikipedia.org/wiki/${urlTitle}" target="_blank">Open on Wikipedia</a>`
+        `<strong>${title}</strong><br><a href="${wikiUrl}" target="_blank">Open on Wikipedia</a>`
       );
 
       const already = wikiPlacemarks.some(p => Math.hypot(p.lat - page.lat, p.lng - page.lon) < 1e-5);
@@ -518,6 +558,7 @@
           lat: page.lat,
           lng: page.lon,
           title,
+          url: wikiUrl,
           marker: wikiMarker,
           consumed: false
         });
@@ -540,7 +581,7 @@
 
       document.getElementById("infoContent").innerHTML = `<h3>${title}</h3>${imgHtml}
   <p>${extract}</p>
-  <a href="https://en.wikipedia.org/wiki/${urlTitle}" target="_blank">Read more on Wikipedia</a>
+  <a href="${wikiUrl}" target="_blank">Read more on Wikipedia</a>
 `;
 
       showInfoPanel();
@@ -552,10 +593,15 @@
     }
   }
 
-  const ENEMY_BASE_COUNT = 15;
-  const ENEMY_PROJECTILE_SPEED_SCALE = 0.4;
-  const ENEMY_COUNT_INCREMENT = 12;
+  const ENEMY_BASE_COUNT = 12;
+  const ENEMY_PROJECTILE_SPEED_SCALE = 0.32;
+  const ENEMY_PROJECTILE_BASE_SPEED_FACTOR = 0.8;
+  const ENEMY_PROJECTILE_SPEED_STEP = 0.12;
+  const ENEMY_FIRE_RATE_BASE = 0.55;
+  const ENEMY_FIRE_RATE_STEP = 0.14;
+  const ENEMY_COUNT_INCREMENT = 10;
   const ENEMY_JITTER = 0.01;
+  const BOSS_SPAWN_RADIUS = 0.05;
   const DESTINATION_CAPTURE_RADIUS = 0.0095;
   const ROUTE_RETURN_FORCE = 0.015;
   const HEAL_ON_WIKI_RADIUS = 0.0032;  // distance threshold for pickup
@@ -587,9 +633,9 @@
       size: 78,
       glowColor: 'rgba(173, 102, 255, 0.65)',
       collisionDamage: 2,
-      fireChance: 0.018,
+      fireChance: 0.012,
       projectile: {
-        speed: 0.00038,
+        speed: 0.0003,
         radius: 6, // Keep radius the same
         color: '#400080', // Darker purple
         fillColor: '#6000b0', // Darker purple fill
@@ -611,9 +657,9 @@
       size: 74,
       glowColor: 'rgba(84, 220, 255, 0.65)',
       collisionDamage: 2,
-      fireChance: 0.022,
+      fireChance: 0.018,
       projectile: {
-        speed: 0.0006,
+        speed: 0.00048,
         radius: 5, // Keep radius the same
         color: '#004080', // Darker blue
         fillColor: '#0060b0', // Darker blue fill
@@ -653,17 +699,17 @@
       size: 72,
       glowColor: 'rgba(250, 105, 255, 0.65)',
       collisionDamage: 1,
-      fireChance: 0.014,
+      fireChance: 0.01,
       projectile: {
-        speed: 0.00038,
+        speed: 0.0003,
         radius: 5, // Keep radius the same
         color: '#800080', // Darker magenta
         fillColor: '#b000b0', // Darker magenta fill
         lifetime: 260,
         damage: 1,
         aim: 'player',
-        burstCount: 2,
-        burstSpread: 14 * Math.PI / 180,
+        burstCount: 1,
+        burstSpread: 10 * Math.PI / 180,
         targetJitter: 0.18,
         randomJitter: 0.08
       }
@@ -706,32 +752,156 @@
       size: 88,
       glowColor: 'rgba(255, 92, 92, 0.6)',
       collisionDamage: 4,
-      fireChance: 0.012,
+      fireChance: 0.008,
       projectile: {
-        speed: 0.0003,
+        speed: 0.00024,
         radius: 9, // Keep radius the same
         color: '#a00000', // Darker red
         fillColor: '#d00000', // Darker red fill
         lifetime: 340,
         damage: 1,
         aim: 'player',
-        burstCount: 2,
+        burstCount: 1,
         burstSpread: 12 * Math.PI / 180,
         targetJitter: 0.15
+      }
+    },
+    lurker: {
+      id: 'lurker',
+      label: 'Lurker',
+      sprite: 'assets/alien2.png',
+      spriteSize: 54,
+      health: 6,
+      accelVariance: 0.00006,
+      maxVelocity: 0.00055,
+      maxDistance: 0.02,
+      behavior: 'skirmisher',
+      hue: 0,
+      size: 74,
+      glowColor: 'rgba(140, 255, 200, 0.55)',
+      collisionDamage: 2,
+      fireChance: 0.016,
+      projectile: {
+        speed: 0.00028,
+        radius: 5,
+        color: '#1cb0a7',
+        fillColor: '#2fdac9',
+        lifetime: 280,
+        damage: 1,
+        aim: 'player',
+        targetJitter: 0.16
+      }
+    },
+    arachnid: {
+      id: 'arachnid',
+      label: 'Web Stalker',
+      sprite: 'assets/spider.png',
+      spriteSize: 60,
+      health: 9,
+      accelVariance: 0.00008,
+      maxVelocity: 0.0008,
+      maxDistance: 0.028,
+      behavior: 'charger',
+      chargeIntensity: 0.00015,
+      engageRadius: 0.04,
+      hue: 330,
+      size: 80,
+      glowColor: 'rgba(240, 132, 255, 0.6)',
+      collisionDamage: 3,
+      fireChance: 0.006,
+      projectile: {
+        speed: 0.00026,
+        radius: 6,
+        color: '#7c1ae0',
+        fillColor: '#a24bff',
+        lifetime: 260,
+        damage: 1,
+        aim: 'player',
+        burstCount: 2,
+        burstSpread: 14 * Math.PI / 180,
+        targetJitter: 0.2
+      }
+    },
+    ooze: {
+      id: 'ooze',
+      label: 'Plasma Blob',
+      sprite: 'assets/blob.png',
+      spriteSize: 56,
+      health: 16,
+      accelVariance: 0.00004,
+      maxVelocity: 0.0003,
+      maxDistance: 0.018,
+      behavior: 'wander',
+      hue: 90,
+      size: 86,
+      glowColor: 'rgba(151, 255, 125, 0.55)',
+      collisionDamage: 4,
+      fireChance: 0.013,
+      projectile: {
+        speed: 0.00022,
+        radius: 7,
+        color: '#58d66b',
+        fillColor: '#7ff58f',
+        lifetime: 360,
+        damage: 1,
+        aim: 'player',
+        burstCount: 1,
+        targetJitter: 0.1
+      },
+      bomb: {
+        chance: 0.45,
+        cooldownMs: 4200,
+        radius: 16,
+        color: '#66ff99',
+        fillColor: '#a4ffc6',
+        fillOpacity: 0.5,
+        triggerRadius: 0.0032,
+        disarmRadius: 0.0036,
+        damage: 2,
+        lifetimeMs: 9000
+      }
+    },
+    sentinel: {
+      id: 'sentinel',
+      label: 'Sentinel',
+      health: 28,
+      accelVariance: 0.00004,
+      maxVelocity: 0.0004,
+      maxDistance: 0.03,
+      behavior: 'charger',
+      chargeIntensity: 0.0001,
+      engageRadius: 0.04,
+      hue: 180,
+      size: 90,
+      glowColor: 'rgba(255, 100, 100, 0.75)',
+      collisionDamage: 2,
+      fireChance: 0.018,
+      projectile: {
+        speed: 0.00034,
+        radius: 8,
+        color: '#ff4d4d',
+        fillColor: '#ff8080',
+        lifetime: 320,
+        damage: 1,
+        aim: 'player',
+        burstCount: 1,
+        burstSpread: 30 * Math.PI / 180,
+        targetJitter: 0.14,
+        randomJitter: 0.1
       }
     }
   };
 
   const STAGE_TYPE_TABLE = [
     ['scout'], // Level 1
-    ['scout'], // Level 2
-    ['scout', 'gunner'], // Level 3
-    ['scout', 'gunner'], // Level 4
-    ['scout', 'gunner', 'charger'], // Level 5
-    ['gunner', 'charger', 'sniper'], // Level 6
-    ['gunner', 'charger', 'sniper', 'interceptor'], // Level 7
-    ['charger', 'sniper', 'interceptor', 'bomber'], // Level 8
-    ['gunner', 'charger', 'sniper', 'interceptor', 'bomber', 'tank'] // Level 9+
+    ['scout', 'lurker'], // Level 2
+    ['scout', 'lurker', 'gunner'], // Level 3
+    ['gunner', 'lurker', 'charger'], // Level 4
+    ['gunner', 'charger', 'arachnid'], // Level 5
+    ['gunner', 'arachnid', 'sniper', 'lurker'], // Level 6
+    ['sniper', 'interceptor', 'arachnid', 'charger'], // Level 7
+    ['interceptor', 'bomber', 'arachnid', 'ooze'], // Level 8
+    ['gunner', 'interceptor', 'bomber', 'tank', 'ooze', 'arachnid'] // Level 9+
   ];
 
   const POWERUP_TYPES = {
@@ -804,10 +974,10 @@
     if (idx !== -1) enemies.splice(idx, 1);
   }
 
-  function spawnEnemyAt(lat, lng, typeKey = 'gunner') {
+  function spawnEnemyAt(lat, lng, typeKey = 'gunner', overrides = {}) {
     const clampedLat = clampLatitude(lat);
     const normalizedLng = normalizeLongitude(lng);
-    const template = ENEMY_TEMPLATES[typeKey] || ENEMY_TEMPLATES.gunner;
+    const template = overrides.template || ENEMY_TEMPLATES[typeKey] || ENEMY_TEMPLATES.gunner;
 
     const enemy = {
       type: template.id,
@@ -827,7 +997,7 @@
     };
 
     enemy.marker = L.marker([enemy.lat, enemy.lng], {
-      icon: createEnemyIcon(template)
+      icon: createEnemyIcon(template, overrides.size)
     }).addTo(map);
 
     const barColor = template.healthBarColor || template.glowColor || "#800000";
@@ -845,6 +1015,38 @@
     updateEnemyHealthVisual(enemy);
     enemies.push(enemy);
     return enemy;
+  }
+
+  function spawnBoss() {
+    if (boss) return;
+    const dest = routeDestination;
+    if (!dest) return;
+
+    const bossTemplate = JSON.parse(JSON.stringify(ENEMY_TEMPLATES.sentinel));
+    const difficultyOffset = Math.max(0, difficultyLevel - 1);
+    const healthMultiplier = 1 + Math.min(1.1, difficultyOffset * 0.18);
+    const bossHealth = Math.round(bossTemplate.health * healthMultiplier);
+    const bossDamage = bossTemplate.collisionDamage + Math.floor(difficultyOffset / 4);
+    const sizeMultiplier = 1.4 + Math.min(0.6, difficultyOffset * 0.06);
+    const bossSize = Math.round(bossTemplate.size * sizeMultiplier);
+    const baseBurst = bossTemplate.projectile?.burstCount ?? 1;
+    const burstCount = Math.max(1, baseBurst + Math.floor(difficultyOffset / 3));
+
+    bossTemplate.health = bossHealth;
+    bossTemplate.collisionDamage = bossDamage;
+    bossTemplate.size = bossSize;
+    if (bossTemplate.projectile) {
+      bossTemplate.projectile.burstCount = burstCount;
+    }
+
+    boss = spawnEnemyAt(dest.lat, dest.lng, 'sentinel', { size: bossSize, template: bossTemplate });
+    boss.health = bossHealth;
+    boss.maxHealth = bossHealth;
+    boss.collisionDamage = bossDamage;
+    updateEnemyHealthVisual(boss);
+
+    bossFightActive = true;
+    showTemporaryMessage('Warning: Sentinel Detected!', 5000);
   }
 
   function interpolateRoutePoint(t) {
@@ -936,11 +1138,21 @@
         const projectileDamage = projectile.damage ?? 1;
         hitEnemy.health -= projectileDamage;
         if (hitEnemy.health <= 0) {
-          triggerEnemyExplosion(hitEnemy);
-          maybeSpawnPowerUp(hitEnemy.lat, hitEnemy.lng);
-          removeEnemy(hitEnemy);
-          registerEnemyDestroyed();
-          checkStageCleared();
+          recordEnemyKill(hitEnemy);
+          if (hitEnemy === boss) {
+            triggerEnemyExplosion(hitEnemy, true);
+            boss = null;
+            bossFightActive = false;
+            bossDefeated = true;
+            removeEnemy(hitEnemy);
+            showTemporaryMessage('Sentinel destroyed! Proceed to the city to complete the stage.', 5000);
+          } else {
+            triggerEnemyExplosion(hitEnemy);
+            maybeSpawnPowerUp(hitEnemy.lat, hitEnemy.lng);
+            removeEnemy(hitEnemy);
+            registerEnemyDestroyed();
+            checkStageCleared();
+          }
         } else {
           updateEnemyHealthVisual(hitEnemy);
         }
@@ -1006,8 +1218,16 @@ function spawnEnemyProjectile(enemy) {
     baseHeading = Math.random() * Math.PI * 2;
   }
 
-  // Apply global slow-down
-  const speed = ((projectileCfg.speed ?? 0.0003) * (typeof ENEMY_PROJECTILE_SPEED_SCALE === 'number' ? ENEMY_PROJECTILE_SPEED_SCALE : 1)) * (1 + (difficultyLevel - 1) * 0.1);
+  const difficultyOffset = Math.max(0, difficultyLevel - 1);
+  const baseFactor = typeof ENEMY_PROJECTILE_BASE_SPEED_FACTOR === 'number'
+    ? ENEMY_PROJECTILE_BASE_SPEED_FACTOR
+    : 1;
+  const stepFactor = typeof ENEMY_PROJECTILE_SPEED_STEP === 'number'
+    ? ENEMY_PROJECTILE_SPEED_STEP
+    : 0;
+  const projectileSpeedScale = (typeof ENEMY_PROJECTILE_SPEED_SCALE === 'number' ? ENEMY_PROJECTILE_SPEED_SCALE : 1)
+    * (baseFactor + stepFactor * difficultyOffset);
+  const speed = (projectileCfg.speed ?? 0.0003) * projectileSpeedScale;
 
   const burstCount = Math.max(1, projectileCfg.burstCount ?? 1);
   const spread = projectileCfg.burstSpread ?? 0;
@@ -1039,19 +1259,22 @@ function spawnEnemyProjectile(enemy) {
 
 
   function enemiesShootProjectiles() {
-    const fireBoost = 1 + (difficultyLevel - 1) * 0.18;
+    const difficultyOffset = Math.max(0, difficultyLevel - 1);
+    const baseRate = typeof ENEMY_FIRE_RATE_BASE === 'number' ? ENEMY_FIRE_RATE_BASE : 1;
+    const stepRate = typeof ENEMY_FIRE_RATE_STEP === 'number' ? ENEMY_FIRE_RATE_STEP : 0;
+    const fireMultiplier = Math.max(0, baseRate + stepRate * difficultyOffset);
     enemies.forEach((enemy) => {
       const template = enemy.template;
       if (!template || !template.fireChance || !template.projectile) return;
-      if (Math.random() < template.fireChance * fireBoost) {
+      if (Math.random() < template.fireChance * fireMultiplier) {
         spawnEnemyProjectile(enemy);
       }
     });
   }
 
-  const playerMaxHealth = 5;
+  const playerMaxHealth = 10;
   let playerHealth = playerMaxHealth;
-  const STARTING_LIVES = 20;
+  const STARTING_LIVES = 10;
   let playerLives = STARTING_LIVES;
   let respawnInProgress = false;
 
@@ -1105,13 +1328,200 @@ function spawnEnemyProjectile(enemy) {
     clearEnemyBombs();
   }
 
+  const coordinatesEqual = (a, b) => Array.isArray(a) && Array.isArray(b) && a[0] === b[0] && a[1] === b[1];
+
+  function pushRouteVertex(point) {
+    if (!point || typeof point.lat !== 'number' || typeof point.lng !== 'number') return;
+    const coord = [point.lat, point.lng];
+    const last = routeVertices[routeVertices.length - 1];
+    if (!coordinatesEqual(last, coord)) {
+      routeVertices.push(coord);
+    }
+  }
+
+  function addCompletedRouteLine(start, dest) {
+    if (!start || !dest) return;
+    if (typeof start.lat !== 'number' || typeof start.lng !== 'number') return;
+    if (typeof dest.lat !== 'number' || typeof dest.lng !== 'number') return;
+
+    const coords = [
+      [start.lat, start.lng],
+      [dest.lat, dest.lng]
+    ];
+    completedRoutes.push(coords);
+
+    const layer = L.polyline(coords, {
+      color: '#3cffba',
+      weight: 2.5,
+      opacity: 0.7,
+      dashArray: '6 10',
+      interactive: false
+    }).addTo(map);
+
+    if (layer.bringToBack) layer.bringToBack();
+    completedRouteLayers.push(layer);
+
+    if (!routeVertices.length) {
+      routeVertices.push([start.lat, start.lng]);
+    } else {
+      pushRouteVertex(start);
+    }
+    pushRouteVertex(dest);
+  }
+
+  async function showCompletedRoutesOverview() {
+    if (!completedRoutes.length || routeVertices.length < 2) return;
+    const allPoints = routeVertices.map(([lat, lng]) => [lat, lng]);
+    if (!allPoints.length) return;
+
+    const bounds = L.latLngBounds(allPoints);
+    if (!bounds.isValid()) return;
+
+    const previousCenter = map.getCenter();
+    const previousZoom = map.getZoom();
+    const originalMinZoom = typeof map.getMinZoom === 'function'
+      ? map.getMinZoom()
+      : map.options?.minZoom ?? 12;
+
+    if (typeof map.setMinZoom === 'function') {
+      map.setMinZoom(Math.min(2, originalMinZoom));
+    }
+
+    const overviewRoute = L.polyline(routeVertices, {
+      color: '#fff35c',
+      weight: 6,
+      opacity: 0.92,
+      interactive: false
+    }).addTo(map);
+
+    if (overviewRoute.bringToFront) overviewRoute.bringToFront();
+
+    map.flyToBounds(bounds.pad(0.35), { duration: 1.35 });
+    await sleep(1600);
+    await sleep(1600);
+
+    map.flyTo(previousCenter, previousZoom, { duration: 1.25 });
+    await sleep(1350);
+
+    map.removeLayer(overviewRoute);
+
+    if (typeof map.setMinZoom === 'function') {
+      map.setMinZoom(originalMinZoom);
+    }
+    ensureAheadView({ immediate: true });
+  }
+
+  function showEndgameSummary({ outcome = 'victory', reason = '' } = {}) {
+    if (endgameSummaryShown) return;
+    endgameSummaryShown = true;
+    gamePaused = true;
+    respawnInProgress = false;
+    legTransitionInProgress = false;
+
+    const { container, message: messageEl, button, nextLevelButton, countdown } = overlayElements;
+    if (!container || !messageEl) return;
+
+    container.classList.remove('hidden');
+    container.style.display = 'flex';
+    container.setAttribute('aria-hidden', 'false');
+
+    if (countdown) countdown.textContent = '';
+    if (nextLevelButton) nextLevelButton.style.display = 'none';
+
+    const killEntries = Object.values(killStatsById)
+      .filter(entry => entry.count > 0)
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+
+    const killGridHtml = killEntries.length
+      ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:16px;">
+          ${killEntries.map(({ label, sprite, count }) => `
+            <div style=\"background:rgba(11,22,33,0.92);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:18px 14px;display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 12px 28px rgba(0,0,0,0.35);\">
+              <div style=\"width:76px;height:76px;border-radius:50%;background:rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;\">
+                <img src=\"${sprite}\" alt=\"${label}\" style=\"max-width:64px;max-height:64px;\">
+              </div>
+              <div style=\"font-size:15px;font-weight:600;text-align:center;letter-spacing:0.3px;\">${label}</div>
+              <div style=\"font-size:30px;font-weight:700;color:#80faff;\">${count.toLocaleString()}</div>
+            </div>
+          `).join('')}
+        </div>`
+      : `<div style="padding:24px;border-radius:14px;background:rgba(255,255,255,0.08);text-align:center;">No hostiles were eliminated.</div>`;
+
+    const uniqueCities = visitedCityNames.reduce((acc, name) => {
+      if (name && !acc.includes(name)) acc.push(name);
+      return acc;
+    }, []);
+    const cityListHtml = uniqueCities.length
+      ? uniqueCities.map((name) => `<li style="margin-bottom:6px;">${name}</li>`).join('')
+      : '<li>None</li>';
+
+    const uniqueHeals = [];
+    const seenHealKeys = new Set();
+    healedPlacemarks.forEach(({ title, url }) => {
+      const key = url || title;
+      if (!key || seenHealKeys.has(key)) return;
+      seenHealKeys.add(key);
+      uniqueHeals.push({ title, url });
+    });
+    const healListHtml = uniqueHeals.length
+      ? uniqueHeals.map(({ title, url }) => {
+          const safeTitle = title || url;
+          const anchor = url ? `<a href="${url}" target="_blank" rel="noopener">${safeTitle}</a>` : safeTitle;
+          return `<li style="margin-bottom:6px;">${anchor}</li>`;
+        }).join('')
+      : '<li>None</li>';
+
+    const heading = outcome === 'victory' ? 'Mission Accomplished' : 'Mission Failed';
+    const reasonHtml = reason ? `<p style="text-align:center;color:#ffd783;margin-bottom:18px;">${reason}</p>` : '';
+
+    container.style.padding = '32px 0';
+    container.style.alignItems = 'stretch';
+    container.style.justifyContent = 'center';
+
+    messageEl.innerHTML = `
+      <div class="run-summary" style="width: min(1100px, 92vw); max-height: 92vh; overflow-y: auto; background: rgba(6,12,18,0.9); border-radius: 22px; border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 32px 80px rgba(0,0,0,0.45); padding: 32px 36px; margin: 0 auto; text-align: left; line-height: 1.55;">
+        <h2 style="text-align:center;margin-bottom:18px;letter-spacing:0.6px;font-size:32px;">${heading}</h2>
+        ${reasonHtml}
+        <div class="summary-section" style="margin-bottom:28px;">
+          <h3 style="margin-bottom:12px;letter-spacing:0.4px;text-transform:uppercase;font-size:14px;color:#8fdfff;">Hostiles Neutralized</h3>
+          ${killGridHtml}
+        </div>
+        <div class="summary-section" style="margin-bottom:24px;">
+          <h3 style="margin-bottom:10px;letter-spacing:0.4px;text-transform:uppercase;font-size:14px;color:#8fdfff;">Cities Visited (${uniqueCities.length})</h3>
+          <ol style="padding-left:22px;margin:0;">
+            ${cityListHtml}
+          </ol>
+        </div>
+        <div class="summary-section">
+          <h3 style="margin-bottom:10px;letter-spacing:0.4px;text-transform:uppercase;font-size:14px;color:#8fdfff;">Landmarks Healed At (${uniqueHeals.length})</h3>
+          <ul style="padding-left:22px;margin:0;">
+            ${healListHtml}
+          </ul>
+        </div>
+      </div>
+    `;
+
+    if (button) {
+      const clone = button.cloneNode(true);
+      button.parentNode.replaceChild(clone, button);
+      overlayElements.button = clone;
+      clone.style.display = 'inline-block';
+      clone.disabled = false;
+      clone.textContent = 'Play Again';
+      clone.addEventListener('click', () => window.location.reload(), { once: true });
+    }
+  }
+
   async function handlePlayerDeath(reason) {
     if (respawnInProgress) return;
     respawnInProgress = true;
 
-    playerLives -= 1;
-    if (playerLives < 0) playerLives = 0;
+    playerLives = Math.max(0, playerLives - 1);
     updateLivesDisplay();
+
+    if (playerLives === 0) {
+      showEndgameSummary({ outcome: 'defeat', reason: `${reason} Lives depleted.` });
+      return;
+    }
 
     playerHealth = playerMaxHealth;
     updatePlayerHealthBar();
@@ -1137,18 +1547,8 @@ function spawnEnemyProjectile(enemy) {
     carHeading = 0;
     ensureAheadView({ immediate: true });
 
-    const remainingLives = playerLives;
-    const message = remainingLives > 0
-      ? `${reason} Lives remaining: ${remainingLives}.`
-      : `Game Over.`;
-
+    const message = `${reason} Lives remaining: ${playerLives}.`;
     await runRespawnCountdown(message);
-
-    if (remainingLives <= 0) {
-      prepareOverlay({ message: 'Game Over. Refresh the page to play again.', showButton: false });
-      gamePaused = true; // Permanently pause the game
-      return; // Stop the respawn process
-    }
 
     respawnInProgress = false;
     requestAnimationFrame(updateCarPosition);
@@ -1161,10 +1561,10 @@ function spawnEnemyProjectile(enemy) {
       let newLat = latlng.lat;
       let newLng = latlng.lng;
 
-      if (keysPressed['ArrowLeft']) carHeading -= 2;
-      if (keysPressed['ArrowRight']) carHeading += 2;
-      if (keysPressed['ArrowUp']) carSpeed += 0.003;
-      if (keysPressed['ArrowDown']) carSpeed -= 0.003;
+      if (keysPressed['ArrowLeft']) carHeading -= 2.5;
+      if (keysPressed['ArrowRight']) carHeading += 2.5;
+      if (keysPressed['ArrowUp']) carSpeed += 0.004;
+      if (keysPressed['ArrowDown']) carSpeed -= 0.004;
 
       if (window.innerWidth <= 768 && touchTarget) {
         const mapCenter = map.latLngToContainerPoint(latlng);
@@ -1172,7 +1572,7 @@ function spawnEnemyProjectile(enemy) {
         const angle = Math.atan2(touchPoint.x - mapCenter.x, mapCenter.y - touchPoint.y);
         const targetHeading = angle * 180 / Math.PI;
         const delta = ((targetHeading - carHeading + 540) % 360) - 180;
-        carHeading += delta * 0.01;
+        carHeading += delta * 0.015;
         const targetSpeed = 0.06;
         carSpeed += (targetSpeed - carSpeed) * 0.001;
       }
@@ -1197,29 +1597,46 @@ function spawnEnemyProjectile(enemy) {
           // --- Homing missile logic ---
           for (let i = projectiles.length - 1; i >= 0; i--) {
             const p = projectiles[i];
-            if (p.seeking && p.target && p.target.health > 0 && p.marker) {
-              const dLat = p.target.lat - p.lat;
-              const dLng = p.target.lng - p.lng;
-              const dist = Math.hypot(dLat, dLng);
-              
-              if (dist > 0.0001) {
-                p.dx += (dLng / dist) * p.acceleration;
-                p.dy += (dLat / dist) * p.acceleration;
+            if (!p.seeking) continue;
+
+            if (!p.target || p.target.health <= 0) {
+              p.target = findNearestEnemy(p.lat, p.lng);
+              if (!p.target) {
+                p.dx *= 0.98;
+                p.dy *= 0.98;
+                continue;
+              }
+            }
+
+            const dLat = p.target.lat - p.lat;
+            const dLng = p.target.lng - p.lng;
+            const dist = Math.hypot(dLat, dLng);
+
+            if (dist > 0.00005) {
+              const accel = p.acceleration ?? 0;
+              if (accel > 0) {
+                p.dx += (dLng / dist) * accel;
+                p.dy += (dLat / dist) * accel;
+              }
+
+              const maxSpeed = p.maxSpeed ?? Math.hypot(p.dx, p.dy);
+              const turnRate = p.turnRate ?? 0.15;
+              if (turnRate > 0) {
+                const desiredDx = (dLng / dist) * maxSpeed;
+                const desiredDy = (dLat / dist) * maxSpeed;
+                p.dx += (desiredDx - p.dx) * turnRate;
+                p.dy += (desiredDy - p.dy) * turnRate;
               }
 
               const currentSpeed = Math.hypot(p.dx, p.dy);
-              if (currentSpeed > p.maxSpeed) {
-                p.dx = (p.dx / currentSpeed) * p.maxSpeed;
-                p.dy = (p.dy / currentSpeed) * p.maxSpeed;
+              if (maxSpeed > 0 && currentSpeed > maxSpeed) {
+                p.dx = (p.dx / currentSpeed) * maxSpeed;
+                p.dy = (p.dy / currentSpeed) * maxSpeed;
               }
-              
-              // Add smoke trail
-              if (Math.random() < 0.5) {
-                addSmokeParticle(p.lat, p.lng);
-              }
+            }
 
-            } else if (p.seeking) {
-              p.seeking = false;
+            if (Math.random() < 0.5) {
+              addSmokeParticle(p.lat, p.lng);
             }
           }
           img.style.transformOrigin = 'center center';
@@ -1324,17 +1741,18 @@ function spawnEnemyProjectile(enemy) {
 
       if (routeDestination) {
         const distanceToDest = Math.hypot(routeDestination.lat - newLat, routeDestination.lng - newLng);
-        if (distanceToDest < DESTINATION_CAPTURE_RADIUS) {
-          if ((stageCleared || enemies.length === 0) && !legTransitionInProgress) {
-            advanceToNextCity();
-          } else {
-            const nowTs = Date.now();
-            if (nowTs - lastCaptureWarningTs > 2500) {
-              const requiredRemaining = Math.max(hostilesRequiredThisStage - hostilesDestroyedThisStage, 0);
-              const contacts = Math.max(requiredRemaining, enemies.length);
-              showTemporaryMessage(`Objective incomplete: neutralize ${requiredRemaining} more hostiles before entering ${getCityName(currentDestIdx)}. Sensors show ${contacts} contacts nearby.`, 3500);
-              lastCaptureWarningTs = nowTs;
-            }
+
+        if (distanceToDest < BOSS_SPAWN_RADIUS && stageCleared && !bossFightActive && !legTransitionInProgress && !bossDefeated) {
+          spawnBoss();
+        } else if (distanceToDest < DESTINATION_CAPTURE_RADIUS && bossDefeated && !legTransitionInProgress) {
+          advanceToNextCity();
+        } else if (distanceToDest < DESTINATION_CAPTURE_RADIUS && !stageCleared) {
+          const nowTs = Date.now();
+          if (nowTs - lastCaptureWarningTs > 2500) {
+            const requiredRemaining = Math.max(hostilesRequiredThisStage - hostilesDestroyedThisStage, 0);
+            const contacts = Math.max(requiredRemaining, enemies.length);
+            showTemporaryMessage(`Objective incomplete: neutralize ${requiredRemaining} more hostiles before entering ${getCityName(currentDestIdx)}. Sensors show ${contacts} contacts nearby.`, 3500);
+            lastCaptureWarningTs = nowTs;
           }
         }
       }
@@ -1350,6 +1768,12 @@ function spawnEnemyProjectile(enemy) {
 
           // One-time pickup: mark consumed and remove the marker
           wp.consumed = true;
+          if (wp.title) {
+            healedPlacemarks.push({
+              title: wp.title,
+              url: wp.url || `https://en.wikipedia.org/wiki/${encodeURIComponent(wp.title.replace(/ /g, '_'))}`
+            });
+          }
           if (wp.marker) {
             map.removeLayer(wp.marker);
             wp.marker = null;
@@ -1505,9 +1929,53 @@ function showTemporaryMessage(text, ms = 3000) {
     hostilesEl.textContent = `Hostiles neutralized: ${displayed} / ${requirement}`;
   }
 
+  function recordEnemyKill(enemy) {
+    const template = enemy?.template || ENEMY_TEMPLATES[enemy?.type] || ENEMY_TEMPLATES.gunner;
+    const label = template?.label || template?.id || 'Unknown';
+    const enemyId = template?.id || enemy?.type || label;
+
+    killStats[label] = (killStats[label] || 0) + 1;
+
+    if (!killStatsById[enemyId]) {
+      killStatsById[enemyId] = {
+        id: enemyId,
+        label,
+        sprite: template?.sprite || 'assets/ufo.png',
+        spriteSize: template?.spriteSize || null,
+        count: 0
+      };
+    }
+
+    killStatsById[enemyId].count += 1;
+  }
+
   function registerEnemyDestroyed() {
     hostilesDestroyedThisStage += 1;
     updateHostilesDisplay();
+    if (!bossFightActive) {
+      checkStageCleared();
+    }
+  }
+
+  function findNearestEnemy(lat, lng) {
+    let nearest = null;
+    let nearestDist = Infinity;
+    enemies.forEach((enemy) => {
+      const d = Math.hypot(lat - enemy.lat, lng - enemy.lng);
+      if (d < nearestDist) {
+        nearestDist = d;
+        nearest = enemy;
+      }
+    });
+    return nearest;
+  }
+
+  function checkStageCleared() {
+    if (bossFightActive) return;
+    if (hostilesDestroyedThisStage >= hostilesRequiredThisStage) {
+      stageCleared = true;
+      showTemporaryMessage('Objective complete! Proceed to the destination.', 4000);
+    }
   }
 
   function shuffleArray(array) {
@@ -1540,17 +2008,18 @@ function showTemporaryMessage(text, ms = 3000) {
     return ENEMY_BASE_COUNT + (level - 1) * ENEMY_COUNT_INCREMENT;
   }
 
-  function createEnemyIcon(template) {
-    const size = template.size ?? 80;
+  function createEnemyIcon(template, overrideSize) {
+    const size = overrideSize ?? template.size ?? 80;
     const glowColor = template.glowColor ?? 'rgba(255,255,255,0.6)';
+    const spritePath = template.sprite ?? 'assets/ufo.png';
     const hue = template.hue ?? 0;
-    const imageSize = Math.max(30, size - 18);
+    const imageSize = Math.max(30, template.spriteSize ?? (size - 18));
     return L.divIcon({
       className: 'enemy-marker',
       html: `
         <div style="position:relative;width:${size}px;height:${size}px;">
           <div style="position:absolute;top:50%;left:50%;width:100%;height:100%;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle, ${glowColor} 0%, rgba(0,0,0,0) 72%);opacity:0.78;"></div>
-          <img src="assets/ufo.png" alt="" style="position:absolute;top:50%;left:50%;width:${imageSize}px;height:${imageSize}px;transform:translate(-50%,-50%);filter:hue-rotate(${hue}deg) saturate(1.25);">
+          <img src="${spritePath}" alt="" style="position:absolute;top:50%;left:50%;width:${imageSize}px;height:${imageSize}px;transform:translate(-50%,-50%);filter:hue-rotate(${hue}deg) saturate(1.25);">
         </div>
       `,
       iconSize: [size, size],
@@ -1598,13 +2067,23 @@ function showTemporaryMessage(text, ms = 3000) {
     }, 30);
   }
 
-  function addPlayerProjectile({ lat, lng, dx, dy, damage = 1, color = 'red', fillColor = 'red', radius = 4, lifetime = 100, fillOpacity = 0.9, seeking = false, target = null, turnRate = 0, initialSpeed = 0, acceleration = 0, maxSpeed = 0 }) {
+  function addPlayerProjectile({ lat, lng, dx = 0, dy = 0, damage = 1, color = 'red', fillColor = 'red', radius = 4, lifetime = 100, fillOpacity = 0.9, seeking = false, target = null, turnRate = 0, initialSpeed = 0, acceleration = 0, maxSpeed = 0 }) {
+    let assignedTarget = target;
     if (seeking) {
-      const headingRad = carHeading * Math.PI / 180;
+      if (!assignedTarget || assignedTarget.health <= 0) {
+        assignedTarget = findNearestEnemy(lat, lng);
+      }
+      let headingRad;
+      if (assignedTarget) {
+        const dLat = assignedTarget.lat - lat;
+        const dLng = assignedTarget.lng - lng;
+        headingRad = Math.atan2(dLng, dLat);
+      } else {
+        headingRad = carHeading * Math.PI / 180;
+      }
       dx = Math.sin(headingRad) * initialSpeed;
       dy = Math.cos(headingRad) * initialSpeed;
     }
-
 
     const projectile = {
       lat,
@@ -1613,12 +2092,12 @@ function showTemporaryMessage(text, ms = 3000) {
       dy,
       damage,
       lifetime,
+      seeking,
+      target: assignedTarget,
+      acceleration,
+      maxSpeed,
+      turnRate,
       marker: L.circleMarker([lat, lng], {
-        seeking,
-        target,
-        acceleration,
-        maxSpeed,
-        turnRate,
         radius,
         color,
         fillColor,
@@ -1724,13 +2203,18 @@ function maybeSpawnPowerUp(lat, lng) {
     showTemporaryMessage('Weapon reverted to Wide Spray.', 3000);
   }
 
-function triggerEnemyExplosion(enemy) {
+function triggerEnemyExplosion(enemy, isBoss = false) {
     const template = enemy.template || ENEMY_TEMPLATES.gunner;
     const color = template.explosionColor || template.glowColor || '#ff8a65';
-    
+    const explosionSize = isBoss ? 40 : 12;
+    const shockwaveSize = isBoss ? 30 : 8;
+    const explosionDuration = isBoss ? 40 : 20;
+    const explosionGrowth = isBoss ? 60 : 32;
+    const shockwaveGrowth = isBoss ? 80 : 48;
+
     // Main explosion (larger and brighter)
     const explosion = L.circleMarker([enemy.lat, enemy.lng], {
-      radius: 12,
+      radius: explosionSize,
       color,
       fillColor: color,
       fillOpacity: 0.95,
@@ -1740,7 +2224,7 @@ function triggerEnemyExplosion(enemy) {
 
     // Secondary shockwave ring
     const shockwave = L.circleMarker([enemy.lat, enemy.lng], {
-      radius: 8,
+      radius: shockwaveSize,
       color: '#ffffff',
       fillColor: color,
       fillOpacity: 0.6,
@@ -1749,21 +2233,21 @@ function triggerEnemyExplosion(enemy) {
     }).addTo(map);
 
     let step = 0;
-    const maxSteps = 20;
+    const maxSteps = explosionDuration;
     const interval = setInterval(() => {
       step += 1;
       const progress = step / maxSteps;
       
       // Main explosion grows larger
       explosion.setStyle({
-        radius: 12 + progress * 32,
+        radius: explosionSize + progress * explosionGrowth,
         opacity: 1.0 * (1 - progress),
         fillOpacity: 0.85 * (1 - progress)
       });
       
       // Shockwave expands faster
       shockwave.setStyle({
-        radius: 8 + progress * 48,
+        radius: shockwaveSize + progress * shockwaveGrowth,
         opacity: 0.7 * (1 - progress * progress),
         fillOpacity: 0.4 * (1 - progress * progress)
       });
@@ -1901,43 +2385,51 @@ function triggerEnemyExplosion(enemy) {
   }
 
   function findNextDestinationIndex(fromIdx) {
-    let bestIdx = null;
-    let bestDist = Infinity;
+    const fromCity = cityFeatures[fromIdx];
+    const { targetDistance, distanceVariance } = getDistanceSettings(difficultyLevel);
+    const TARGET_DISTANCE = targetDistance;
+    const DISTANCE_VARIANCE = distanceVariance;
 
-    for (let i = 0; i < cityFeatures.length; i++) {
-      if (i === fromIdx) continue;
-      if (visitedCityIndices.has(i)) continue;
-      const candidate = cityFeatures[i];
-      const dLat = candidate.geometry.coordinates[1] - cityFeatures[fromIdx].geometry.coordinates[1];
-      const dLng = candidate.geometry.coordinates[0] - cityFeatures[fromIdx].geometry.coordinates[0];
-      const dist = Math.hypot(dLat, dLng);
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestIdx = i;
-      }
+    const distances = cityFeatures
+      .map((c, i) => {
+        if (i === fromIdx) return null;
+        const dLat = c.geometry.coordinates[1] - fromCity.geometry.coordinates[1];
+        const dLng = c.geometry.coordinates[0] - fromCity.geometry.coordinates[0];
+        const dist = Math.hypot(dLat, dLng);
+        return { index: i, city: c, distance: dist, visited: visitedCityIndices.has(i) };
+      })
+      .filter(d => d && d.distance > MIN_CITY_DISTANCE);
+
+    const unvisited = distances.filter(d => !d.visited);
+
+    let candidates = unvisited.length > 0 ? unvisited : distances;
+
+    // Find a city within the desired distance range
+    let suitableCandidates = candidates.filter(d => d.distance >= TARGET_DISTANCE - DISTANCE_VARIANCE && d.distance <= TARGET_DISTANCE + DISTANCE_VARIANCE);
+
+    if (suitableCandidates.length > 0) {
+      // Pick a random one from the suitable range
+      return suitableCandidates[Math.floor(Math.random() * suitableCandidates.length)].index;
     }
 
-    if (bestIdx !== null) return bestIdx;
+    // If no city is in the ideal range, find the one closest to the target distance
+    candidates.sort((a, b) => Math.abs(a.distance - TARGET_DISTANCE) - Math.abs(b.distance - TARGET_DISTANCE));
 
-    for (let i = 0; i < cityFeatures.length; i++) {
-      if (i === fromIdx) continue;
-      const candidate = cityFeatures[i];
-      const dLat = candidate.geometry.coordinates[1] - cityFeatures[fromIdx].geometry.coordinates[1];
-      const dLng = candidate.geometry.coordinates[0] - cityFeatures[fromIdx].geometry.coordinates[0];
-      const dist = Math.hypot(dLat, dLng);
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestIdx = i;
-      }
+    // If all cities have been visited, allow reusing cities but try to avoid the immediate last one
+    if (unvisited.length === 0) {
+      return candidates[0].index === fromIdx ? candidates[1].index : candidates[0].index;
     }
 
-    return bestIdx;
+    return candidates[0].index;
   }
 
   async function advanceToNextCity() {
     if (legTransitionInProgress) return;
     legTransitionInProgress = true;
     gamePaused = true;
+    boss = null;
+    bossFightActive = false;
+    bossDefeated = false;
 
     // Spin-in animation
     const playerPos = playerMarker.getLatLng();
@@ -1971,39 +2463,55 @@ function triggerEnemyExplosion(enemy) {
         carHeading = 0;
         const iconElement = playerMarker.getElement().querySelector('img');
         if (iconElement) iconElement.style.transform = `rotate(0deg)`;
-        
-        clearExistingEnemies();
-        resetProjectiles();
 
-        visitedCityIndices.add(currentDestIdx);
-        const nextDestIdx = findNextDestinationIndex(currentDestIdx);
+        const completedStart = routeStart ? { ...routeStart } : null;
+        const completedDest = routeDestination ? { ...routeDestination } : null;
+        let nextDestIdx = null;
 
-        if (nextDestIdx === null) {
-          prepareOverlay({ message: 'All cities secured! Mission Accomplished!', showButton: false });
-          return;
-        }
+        const finalizeTransition = async () => {
+          clearExistingEnemies();
+          resetProjectiles();
+          addCompletedRouteLine(completedStart, completedDest);
 
-        prepareOverlay({ message: `Stage ${difficultyLevel} Complete!`, showButton: true });
-        const startButton = overlayElements.button;
-        startButton.textContent = 'Start Next Level';
-        
-        // Use a fresh event listener to avoid stacking them
-        const oldButton = startButton.cloneNode(true);
-        startButton.parentNode.replaceChild(oldButton, startButton);
-        overlayElements.button = oldButton;
+          visitedCityIndices.add(currentDestIdx);
+          const newlyVisitedName = getCityName(currentDestIdx);
+          if (newlyVisitedName && visitedCityNames[visitedCityNames.length - 1] !== newlyVisitedName) {
+            visitedCityNames.push(newlyVisitedName);
+          }
+          nextDestIdx = findNextDestinationIndex(currentDestIdx);
 
-        const startNext = () => {
-          hideOverlay();
-          difficultyLevel += 1;
-          const enemyCount = startLeg({ startIdx: currentDestIdx, destIdx: nextDestIdx, resetPlayerPosition: false, healPlayer: true });
-          const nextRequirement = hostilesRequiredThisStage || enemyCount;
-          setMissionBaseMessage(`Stage ${difficultyLevel}: Neutralize ${nextRequirement} of ${enemyCount} hostiles between ${getCityName(currentStartIdx)} and ${getCityName(currentDestIdx)}.`);
-          stageCleared = false;
-          gamePaused = false;
-          requestAnimationFrame(updateCarPosition);
-          legTransitionInProgress = false;
+          await showCompletedRoutesOverview();
+
+          if (nextDestIdx === null) {
+            showEndgameSummary({ outcome: 'victory' });
+            legTransitionInProgress = false;
+            return;
+          }
+
+          prepareOverlay({ message: `Stage ${difficultyLevel} Complete!`, showButton: true });
+          const startButton = overlayElements.button;
+          startButton.textContent = 'Start Next Level';
+
+          // Use a fresh event listener to avoid stacking them
+          const oldButton = startButton.cloneNode(true);
+          startButton.parentNode.replaceChild(oldButton, startButton);
+          overlayElements.button = oldButton;
+
+          const startNext = () => {
+            hideOverlay();
+            difficultyLevel += 1;
+            const enemyCount = startLeg({ startIdx: currentDestIdx, destIdx: nextDestIdx, resetPlayerPosition: false, healPlayer: true });
+            const nextRequirement = hostilesRequiredThisStage || enemyCount;
+            setMissionBaseMessage(`Stage ${difficultyLevel}: Neutralize ${nextRequirement} of ${enemyCount} hostiles between ${getCityName(currentStartIdx)} and ${getCityName(currentDestIdx)}.`);
+            stageCleared = false;
+            gamePaused = false;
+            requestAnimationFrame(updateCarPosition);
+            legTransitionInProgress = false;
+          };
+          overlayElements.button.addEventListener('click', startNext, { once: true });
         };
-        overlayElements.button.addEventListener('click', startNext, { once: true });
+
+        void finalizeTransition();
       }
     };
 
