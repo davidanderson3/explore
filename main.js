@@ -498,16 +498,18 @@
       lat,
       lng,
       damage: 14,
-      color: '#ff7043',
-      fillColor: '#ffbfa6',
-      radius: 6,
-      lifetime: 420,
+      color: '#150000',
+      fillColor: '#8b0000',
+      radius: 8,
+      lifetime: 600,
       seeking: true,
       target: closestEnemy,
-      turnRate: 0.18,
-      initialSpeed: 0.0016,
-      acceleration: 0.00007,
-      maxSpeed: 0.0048
+      turnRate: 0.12,
+      initialSpeed: 0.0005,
+      acceleration: 0.00003,
+      maxSpeed: 0.0018,
+      fillOpacity: 0.95,
+      outlineWeight: 2
     });
   }
 
@@ -1418,12 +1420,14 @@ function spawnEnemyProjectile(enemy) {
     respawnInProgress = false;
     legTransitionInProgress = false;
 
-    const { container, message: messageEl, button, nextLevelButton, countdown } = overlayElements;
+    const { container, message: messageEl, nextLevelButton, countdown } = overlayElements;
     if (!container || !messageEl) return;
 
     container.classList.remove('hidden');
     container.style.display = 'flex';
     container.setAttribute('aria-hidden', 'false');
+    container.classList.add('summary-mode');
+    container.setAttribute('data-overlay-state', 'summary');
 
     if (countdown) countdown.textContent = '';
     if (nextLevelButton) nextLevelButton.style.display = 'none';
@@ -1432,27 +1436,33 @@ function spawnEnemyProjectile(enemy) {
       .filter(entry => entry.count > 0)
       .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
 
-    const killGridHtml = killEntries.length
-      ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:16px;">
-          ${killEntries.map(({ label, sprite, count }) => `
-            <div style=\"background:rgba(11,22,33,0.92);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:18px 14px;display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 12px 28px rgba(0,0,0,0.35);\">
-              <div style=\"width:76px;height:76px;border-radius:50%;background:rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;\">
-                <img src=\"${sprite}\" alt=\"${label}\" style=\"max-width:64px;max-height:64px;\">
+    const totalKills = killEntries.reduce((sum, entry) => sum + entry.count, 0);
+
+    const killCardsHtml = killEntries.length
+      ? killEntries.map(({ label, sprite, count, hue = 0, glowColor = 'rgba(255,255,255,0.65)', size = 80, spriteSize = null }) => {
+          const avatarSize = Math.min(120, Math.max(68, size));
+          const renderedSpriteSize = Math.max(42, spriteSize ?? Math.round(avatarSize * 0.68));
+          const spritePath = sprite || 'assets/ufo.png';
+          return `
+            <article class="summary-card">
+              <div class="summary-card__avatar" style="width:${avatarSize}px;height:${avatarSize}px;">
+                <span class="summary-card__glow" style="background:radial-gradient(circle, ${glowColor} 0%, rgba(255,255,255,0) 74%);"></span>
+                <img src="${spritePath}" alt="${label}" style="width:${renderedSpriteSize}px;height:${renderedSpriteSize}px;filter:hue-rotate(${hue}deg) saturate(1.25);" />
               </div>
-              <div style=\"font-size:15px;font-weight:600;text-align:center;letter-spacing:0.3px;\">${label}</div>
-              <div style=\"font-size:30px;font-weight:700;color:#80faff;\">${count.toLocaleString()}</div>
-            </div>
-          `).join('')}
-        </div>`
-      : `<div style="padding:24px;border-radius:14px;background:rgba(255,255,255,0.08);text-align:center;">No hostiles were eliminated.</div>`;
+              <h4 class="summary-card__label">${label}</h4>
+              <p class="summary-card__value">${count.toLocaleString()}</p>
+            </article>
+          `;
+        }).join('')
+      : '<p class="summary-empty">No hostiles were eliminated.</p>';
 
     const uniqueCities = visitedCityNames.reduce((acc, name) => {
       if (name && !acc.includes(name)) acc.push(name);
       return acc;
     }, []);
     const cityListHtml = uniqueCities.length
-      ? uniqueCities.map((name) => `<li style="margin-bottom:6px;">${name}</li>`).join('')
-      : '<li>None</li>';
+      ? uniqueCities.map((name) => `<li class="summary-list__item">${name}</li>`).join('')
+      : '<li class="summary-list__item">None</li>';
 
     const uniqueHeals = [];
     const seenHealKeys = new Set();
@@ -1465,49 +1475,73 @@ function spawnEnemyProjectile(enemy) {
     const healListHtml = uniqueHeals.length
       ? uniqueHeals.map(({ title, url }) => {
           const safeTitle = title || url;
-          const anchor = url ? `<a href="${url}" target="_blank" rel="noopener">${safeTitle}</a>` : safeTitle;
-          return `<li style="margin-bottom:6px;">${anchor}</li>`;
+          const anchor = url ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${safeTitle}</a>` : safeTitle;
+          return `<li class="summary-list__item">${anchor}</li>`;
         }).join('')
-      : '<li>None</li>';
+      : '<li class="summary-list__item">None</li>';
 
     const heading = outcome === 'victory' ? 'Mission Accomplished' : 'Mission Failed';
-    const reasonHtml = reason ? `<p style="text-align:center;color:#ffd783;margin-bottom:18px;">${reason}</p>` : '';
+    const reasonHtml = reason ? `<p class="summary-reason">${reason}</p>` : '';
 
-    container.style.padding = '32px 0';
-    container.style.alignItems = 'stretch';
-    container.style.justifyContent = 'center';
+    const content = container.querySelector('.start-screen__content');
+    let summaryRoot = messageEl;
 
-    messageEl.innerHTML = `
-      <div class="run-summary" style="width: min(1100px, 92vw); max-height: 92vh; overflow-y: auto; background: rgba(6,12,18,0.9); border-radius: 22px; border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 32px 80px rgba(0,0,0,0.45); padding: 32px 36px; margin: 0 auto; text-align: left; line-height: 1.55;">
-        <h2 style="text-align:center;margin-bottom:18px;letter-spacing:0.6px;font-size:32px;">${heading}</h2>
+    if (content) {
+      content.innerHTML = '';
+      content.classList.add('summary-content');
+      summaryRoot = document.createElement('div');
+      summaryRoot.className = 'summary-layout';
+      content.appendChild(summaryRoot);
+    } else {
+      summaryRoot.classList.add('summary-layout');
+      summaryRoot.innerHTML = '';
+    }
+    overlayElements.message = summaryRoot;
+
+    summaryRoot.innerHTML = `
+      <header class="summary-header">
+        <h2>${heading}</h2>
         ${reasonHtml}
-        <div class="summary-section" style="margin-bottom:28px;">
-          <h3 style="margin-bottom:12px;letter-spacing:0.4px;text-transform:uppercase;font-size:14px;color:#8fdfff;">Hostiles Neutralized</h3>
-          ${killGridHtml}
+      </header>
+      <section class="summary-panel summary-panel--cards">
+        <div class="summary-panel__head">
+          <h3>Hostiles Neutralized</h3>
+          <span class="summary-panel__meta">${totalKills.toLocaleString()} total</span>
         </div>
-        <div class="summary-section" style="margin-bottom:24px;">
-          <h3 style="margin-bottom:10px;letter-spacing:0.4px;text-transform:uppercase;font-size:14px;color:#8fdfff;">Cities Visited (${uniqueCities.length})</h3>
-          <ol style="padding-left:22px;margin:0;">
+        <div class="summary-grid">
+          ${killCardsHtml}
+        </div>
+      </section>
+      <div class="summary-columns">
+        <section class="summary-panel">
+          <div class="summary-panel__head">
+            <h3>Cities Visited</h3>
+            <span class="summary-panel__meta">${uniqueCities.length}</span>
+          </div>
+          <ol class="summary-list">
             ${cityListHtml}
           </ol>
-        </div>
-        <div class="summary-section">
-          <h3 style="margin-bottom:10px;letter-spacing:0.4px;text-transform:uppercase;font-size:14px;color:#8fdfff;">Landmarks Healed At (${uniqueHeals.length})</h3>
-          <ul style="padding-left:22px;margin:0;">
+        </section>
+        <section class="summary-panel">
+          <div class="summary-panel__head">
+            <h3>Landmarks Healed At</h3>
+            <span class="summary-panel__meta">${uniqueHeals.length}</span>
+          </div>
+          <ul class="summary-list">
             ${healListHtml}
           </ul>
-        </div>
+        </section>
       </div>
+      <footer class="summary-actions">
+        <button class="summary-button" data-role="play-again">Play Again</button>
+      </footer>
     `;
 
-    if (button) {
-      const clone = button.cloneNode(true);
-      button.parentNode.replaceChild(clone, button);
-      overlayElements.button = clone;
-      clone.style.display = 'inline-block';
-      clone.disabled = false;
-      clone.textContent = 'Play Again';
-      clone.addEventListener('click', () => window.location.reload(), { once: true });
+    const playAgainButton = summaryRoot.querySelector('[data-role="play-again"]');
+    if (playAgainButton) {
+      overlayElements.button = playAgainButton;
+      playAgainButton.disabled = false;
+      playAgainButton.addEventListener('click', () => window.location.reload(), { once: true });
     }
   }
 
@@ -1942,6 +1976,9 @@ function showTemporaryMessage(text, ms = 3000) {
         label,
         sprite: template?.sprite || 'assets/ufo.png',
         spriteSize: template?.spriteSize || null,
+        hue: template?.hue ?? 0,
+        glowColor: template?.glowColor ?? 'rgba(255,255,255,0.6)',
+        size: template?.size ?? 80,
         count: 0
       };
     }
@@ -2067,7 +2104,7 @@ function showTemporaryMessage(text, ms = 3000) {
     }, 30);
   }
 
-  function addPlayerProjectile({ lat, lng, dx = 0, dy = 0, damage = 1, color = 'red', fillColor = 'red', radius = 4, lifetime = 100, fillOpacity = 0.9, seeking = false, target = null, turnRate = 0, initialSpeed = 0, acceleration = 0, maxSpeed = 0 }) {
+  function addPlayerProjectile({ lat, lng, dx = 0, dy = 0, damage = 1, color = 'red', fillColor = 'red', radius = 4, lifetime = 100, fillOpacity = 0.9, seeking = false, target = null, turnRate = 0, initialSpeed = 0, acceleration = 0, maxSpeed = 0, outlineWeight = 1 }) {
     let assignedTarget = target;
     if (seeking) {
       if (!assignedTarget || assignedTarget.health <= 0) {
@@ -2102,7 +2139,7 @@ function showTemporaryMessage(text, ms = 3000) {
         color,
         fillColor,
         fillOpacity,
-        weight: 1
+        weight: outlineWeight
       }).addTo(map)
     };
     projectiles.push(projectile);
